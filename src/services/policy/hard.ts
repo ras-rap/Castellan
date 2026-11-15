@@ -1,4 +1,4 @@
-import { toolDisabled, type Capability, type Risk } from '@services/bridge/capabilities.ts';
+import { toolListed, type Capability, type Risk } from '@services/bridge/capabilities.ts';
 import {
   RANK_NAMES,
   config,
@@ -266,13 +266,13 @@ export function hardCheck(input: HardInput): HardDecision {
     return { 'verdict': 'deny', 'layer': 'user', 'reason': 'user-blocked: this account may not use the bot here' };
   const profile = input.account?.profile;
   if (profile) {
-    if (profile.tools.deny.includes(capability.name))
+    if (toolListed(capability.name, profile.tools.deny))
       return {
         'verdict': 'deny',
         'layer': 'user',
         'reason': `user-tools: this account may not use ${capability.name}`,
       };
-    if (profile.tools.allow.length > 0 && !profile.tools.allow.includes(capability.name))
+    if (profile.tools.allow.length > 0 && !toolListed(capability.name, profile.tools.allow))
       return {
         'verdict': 'deny',
         'layer': 'user',
@@ -286,7 +286,7 @@ export function hardCheck(input: HardInput): HardDecision {
       };
   }
 
-  if (toolDisabled(capability.name, features.tools.disabled))
+  if (toolListed(capability.name, features.tools.disabled))
     return { 'verdict': 'deny', 'layer': 'tools', 'reason': `${capability.name} is switched off in this server` };
   if (policy.tools.deny.includes(capability.name))
     return { 'verdict': 'deny', 'layer': 'tools', 'reason': `${capability.name} is on this guild's deny list` };

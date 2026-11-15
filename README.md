@@ -411,9 +411,19 @@ because `rank` pins a tier and that grants capability.
 | --- | --- |
 | `rank` | pins the tier (`guest`…`owner`), replacing whatever their roles say — in both directions |
 | `risk` | highest risk class they may reach: `read`, `reversible`, `destructive`, `admin` |
-| `tools-allow` | whitelist: only these tools/sets (empty = inherit the guild's) |
-| `tools-deny` | blacklist: never these |
+| `tools-allow` | whitelist: only these tools **and/or sets** (empty = inherit the guild's) |
+| `tools-deny` | blacklist: never these tools and/or sets; it wins over `tools-allow` |
 | `commands-allow` / `commands-deny` | the same for slash commands — `config` blocks the whole group, `config:set` just that subcommand |
+
+`tools-allow`/`tools-deny` take one tool, one set (`discord`, `channels`, `shell`, `git`, `pterodactyl`,
+`pterodactyl-admin`, …), or a mix, so "these two panel tools" and "no shell, no git" are both one line:
+
+```
+/access set user:@helperA key:tools-allow value:pterodactyl     # the panel surface, nothing else
+/access set user:@helperB key:tools-deny  value:ptero_power,ptero_command,ptero_file_write
+/access set user:@helperC key:tools-deny  value:shell,git
+/access set user:@helperD key:tools-allow value:messages_fetch,member_info,channels_list
+```
 
 So the three cases look like this:
 

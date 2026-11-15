@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { Runtime } from '@services/agent/runtime.ts';
-import { TOOL_SETS, capabilities, setsOf, toolDisabled } from '@services/bridge/capabilities.ts';
+import { TOOL_SETS, capabilities, setsOf, toolListed } from '@services/bridge/capabilities.ts';
 import { capabilityByName } from '@services/bridge/lookup.ts';
 import { guildDefaults, type GuildSettings } from '@services/config.ts';
 import { audit, sessions } from '@services/database/sqlite.ts';
@@ -373,6 +373,42 @@ describe('per-account access', () => {
     expect(send.reason).toContain('user-tools');
   });
 
+  test('per-account lists take sets as well as names, in both directions', async () => {
+    useGuilds({
+      'g': {
+        'enabled': true,
+        'pterodactyl': { 'enabled': true },
+        'access': {
+          'users': {
+            // "only the panel's read tools" — a set plus two single tools
+            'panel-reader': { 'tools': { 'allow': ['pterodactyl'], 'deny': ['ptero_power', 'ptero_command'] } },
+            'no-shell': { 'tools': { 'deny': ['shell', 'git'] } },
+          },
+        },
+      },
+    });
+
+    const reader = memberStub('panel-reader');
+    expect((await decide('g', reader, capabilityByName('ptero_servers'), {})).verdict).toBe('allow');
+    expect((await decide('g', reader, capabilityByName('ptero_server'), { 'server': 'a' })).verdict).toBe('allow');
+    // the set admits the panel, the deny list still wins on the two that act
+    const power = await decide('g', reader, capabilityByName('ptero_power'), { 'server': 'a', 'signal': 'stop' });
+    expect(power.verdict).toBe('deny');
+    expect(power.reason).toContain('user-tools');
+    // and anything outside the set is out
+    expect(
+      (await decide('g', reader, capabilityByName('message_send'), { 'channel_id': '1', 'content': 'x' })).verdict,
+    ).toBe('deny');
+
+    const restricted = memberStub('no-shell');
+    const shell = await decide('g', restricted, capabilityByName('bash'), { 'command': 'ls' });
+    expect(shell.verdict).toBe('deny');
+    expect(shell.reason).toContain('user-tools');
+    expect((await decide('g', restricted, capabilityByName('git_commit'), { 'message': 'x' })).verdict).toBe('deny');
+    // a set that was not named is unaffected
+    expect((await decide('g', restricted, capabilityByName('channels_list'), {})).verdict).toBe('allow');
+  });
+
   test('a per-account deny beats the guild allow list', async () => {
     useGuilds({
       'g': {
@@ -448,13 +484,13 @@ describe('feature flags', () => {
   });
 
   test('a set is a switch over exactly its own tools', () => {
-    expect(toolDisabled('channel_delete', ['channels'])).toBe(true);
-    expect(toolDisabled('channel_delete', ['messages'])).toBe(false);
-    expect(toolDisabled('message_send', ['discord'])).toBe(true);
+    expect(toolListed('channel_delete', ['channels'])).toBe(true);
+    expect(toolListed('channel_delete', ['messages'])).toBe(false);
+    expect(toolListed('message_send', ['discord'])).toBe(true);
     // "turn off the Discord tools" must leave the sandboxed shell alone: they are separate blast radii.
-    expect(toolDisabled('bash', ['discord'])).toBe(false);
-    expect(toolDisabled('bash', ['shell'])).toBe(true);
-    expect(toolDisabled('member_ban', ['member_ban'])).toBe(true);
+    expect(toolListed('bash', ['discord'])).toBe(false);
+    expect(toolListed('bash', ['shell'])).toBe(true);
+    expect(toolListed('member_ban', ['member_ban'])).toBe(true);
   });
 
   test('a switched-off tool is refused even for the owner and even when allow-listed', async () => {

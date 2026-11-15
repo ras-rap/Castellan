@@ -1,6 +1,6 @@
 import { models } from '@services/agent/models.ts';
 import { providerConfigBlocks } from '@services/agent/providers.ts';
-import { capabilities, setsOf, toolDisabled, type ParamSpec } from '@services/bridge/capabilities.ts';
+import { capabilities, setsOf, toolListed, type ParamSpec } from '@services/bridge/capabilities.ts';
 import { MODELS, config, type GuildFeatures } from '@services/config.ts';
 import { resolveForge } from '@services/git/forge.ts';
 import { resolvePtero } from '@services/pterodactyl/api.ts';
@@ -73,7 +73,7 @@ export function renderDiscordToolFile(guildId?: string): string {
   const panel = guildId === undefined ? undefined : resolvePtero(guildId);
   const panelSettings = guildId === undefined ? undefined : config.pterodactyl(guildId);
   const tools = capabilities
-    .filter(capability => !toolDisabled(capability.name, disabled))
+    .filter(capability => !toolListed(capability.name, disabled))
     .filter(capability => {
       if (guildId === undefined) return true;
       if (capability.name === 'git_push') return forge !== undefined;
@@ -137,7 +137,7 @@ export function renderWorkspaceConfig(guildId?: string): string {
   // resurrect opencode's own bash, which runs on the host, so the permission entry denies the name outright.
   const denied = Object.fromEntries(
     capabilities
-      .filter(capability => toolDisabled(capability.name, disabled))
+      .filter(capability => toolListed(capability.name, disabled))
       .map(capability => [capability.name, 'deny']),
   );
 
@@ -231,9 +231,9 @@ export function renderAgentsFile(guildName: string, guildId?: string): string {
   const features = featuresFor(guildId);
   const disabled = features.tools.disabled;
   const discord = capabilities.some(
-    capability => setsOf(capability.name).includes('discord') && !toolDisabled(capability.name, disabled),
+    capability => setsOf(capability.name).includes('discord') && !toolListed(capability.name, disabled),
   );
-  const shell = !toolDisabled('bash', disabled);
+  const shell = !toolListed('bash', disabled);
 
   const howToAct = [
     discord

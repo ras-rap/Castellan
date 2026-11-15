@@ -1337,6 +1337,10 @@ export const setsOf = (name: string): ToolSet[] => SETS[name] ?? [];
 /** Names a guild may put in `features.tools.disabled`: one tool, or one set that covers several. */
 export const toolSetNames = (): string[] => [...capabilityNames, ...TOOL_SETS];
 
-/** Disabled by name, or by any set it belongs to. Naming a set is the "all channel tools" switch. */
-export const toolDisabled = (name: string, disabled: readonly string[]): boolean =>
-  disabled.includes(name) || setsOf(name).some(set => disabled.includes(set));
+/**
+ * True when the tool is in the list — by name, or through any set it belongs to. The caller decides which way to
+ * read it: a deny list (`features.tools.disabled`, `policy.tools.deny`, `access.users.<id>.tools.deny`) refuses
+ * the match, a whitelist (`tools.allow`) refuses everything that does not match.
+ */
+export const toolListed = (name: string, list: readonly string[]): boolean =>
+  list.includes(name) || setsOf(name).some(set => list.includes(set));
