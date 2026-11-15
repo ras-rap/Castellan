@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
-import { modelAllowlist, modelRef, knownProviderIds } from '@services/agent/models.ts';
+import { goProbeModel, modelAllowlist, modelRef, knownProviderIds } from '@services/agent/models.ts';
 import { providerConfigBlocks, providerSummary, resolveProviders } from '@services/agent/providers.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 
@@ -93,9 +93,9 @@ describe('workspace provider config', () => {
 describe('model refs', () => {
   test('matches the longest known provider id, because model ids contain slashes', () => {
     useProviders({});
-    expect(modelRef('opencode-go/crouton-alpha-free')).toEqual({
+    expect(modelRef('opencode-go/beam-free')).toEqual({
       'providerID': 'opencode-go',
-      'modelID': 'crouton-alpha-free',
+      'modelID': 'beam-free',
     });
     expect(modelRef('openrouter/anthropic/claude-sonnet-4.5')).toEqual({
       'providerID': 'openrouter',
@@ -104,7 +104,7 @@ describe('model refs', () => {
   });
 
   test('an id without a provider is rejected', () => {
-    expect(() => modelRef('crouton-alpha-free')).toThrow(/must be provider\/model/);
+    expect(() => modelRef('mimo-v2.6-flash-free')).toThrow(/must be provider\/model/);
   });
 
   test('an unknown provider is rejected and the known ones are listed', () => {
@@ -115,10 +115,11 @@ describe('model refs', () => {
 
   test('MODEL_ALLOWLIST pins the deployment when it is set', () => {
     useProviders({});
-    useEnv('MODEL_ALLOWLIST', 'opencode-go/beam-free, opencode-go/crouton-alpha-free');
-    expect(modelAllowlist()).toEqual(['opencode-go/beam-free', 'opencode-go/crouton-alpha-free']);
+    useEnv('MODEL_ALLOWLIST', 'opencode/mimo-v2.6-flash-free, opencode-go/beam-free');
+    expect(modelAllowlist()).toEqual(['opencode/mimo-v2.6-flash-free', 'opencode-go/beam-free']);
     expect(() => modelRef('openai/gpt-5')).toThrow(/MODEL_ALLOWLIST/);
     expect(modelRef('opencode-go/beam-free').modelID).toBe('beam-free');
+    expect(modelRef('opencode/mimo-v2.6-flash-free').modelID).toBe('mimo-v2.6-flash-free');
   });
 
   test('no allowlist means any model from a known provider is accepted', () => {
@@ -126,5 +127,11 @@ describe('model refs', () => {
     useEnv('MODEL_ALLOWLIST', undefined);
     expect(modelAllowlist()).toEqual([]);
     expect(modelRef('openai/gpt-5').providerID).toBe('openai');
+  });
+
+  test('the Go probe follows the first role that runs on Go', () => {
+    useProviders({});
+    // defaults: primary on the keyless free tier, fast on the Go subscription
+    expect(goProbeModel()).toBe('beam-free');
   });
 });

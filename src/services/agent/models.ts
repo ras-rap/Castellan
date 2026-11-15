@@ -60,6 +60,16 @@ export function effectiveModel(role: ModelRole, guildId?: string): { id: string;
   return override ? { 'id': override, 'source': 'guild' } : { 'id': MODELS[role], 'source': 'default' };
 }
 
+/**
+ * Bare model id for a probe against the Go endpoint: the first role that actually runs on the Go
+ * subscription, because that is the model whose entitlement the probe exists to prove. `undefined` when no
+ * role runs on Go, so a probe can be skipped instead of reported as a failure.
+ */
+export function goProbeModel(): string | undefined {
+  const role = [MODELS.primary, MODELS.fast].find(id => id.startsWith('opencode-go/'));
+  return role === undefined ? undefined : role.slice('opencode-go/'.length);
+}
+
 export const models = {
   'primary': (guildId?: string) => modelRef(effectiveModel('primary', guildId).id),
   'fast': (guildId?: string) => modelRef(effectiveModel('fast', guildId).id),

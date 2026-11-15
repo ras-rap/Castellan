@@ -111,12 +111,13 @@ function readGuilds(): z.infer<typeof GuildsFile> {
  * Role → `provider/model`. Every role is overridable from `.env`, and `/model set` overrides a role for one
  * guild. `MODEL_FAST` is used for reflection/consolidation so bulk text never touches the expensive model.
  *
- * The default pair is the OpenCode Go subscription: the provider is served from
- * https://opencode.ai/inference/go — a different base URL from the free tier, which is what "Free usage
- * exceeded, subscribe to Go" means. Point these at any other provider (see `config/providers.example.json`).
+ * The defaults: primary on the keyless free tier, fast on the OpenCode Go subscription, whose provider is
+ * served from https://opencode.ai/inference/go — a different base URL from the free tier, which is what
+ * "Free usage exceeded, subscribe to Go" means. Point these at any other provider (see
+ * `config/providers.example.json`).
  */
 export const MODELS = {
-  'primary': optionalEnv('MODEL_PRIMARY') ?? 'opencode-go/crouton-alpha-free',
+  'primary': optionalEnv('MODEL_PRIMARY') ?? 'opencode/mimo-v2.6-flash-free',
   'fast': optionalEnv('MODEL_FAST') ?? 'opencode-go/beam-free',
   /** Bare id: Jev is called directly, not through opencode, so it has no provider prefix. */
   'jev': optionalEnv('MODEL_JEV') ?? 'jev-1.13-free',

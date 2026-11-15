@@ -4,8 +4,8 @@ Discord-native coding agent on the opencode SDK, with permissioned action in Dis
 and to Discord itself, and self-evolving memory.
 
 Scope: **multi-guild from the start, used on one server (you + friends)**. Shell exec: **docker by default,
-host as an opt-in config flag**. Models: **only `crouton-alpha-free`, `beam-free`, `jev-1.13-free`** (OpenCode
-Go/Zen free tier). Jev comes from OpenCode, not from a separate TypeSafe key.
+host as an opt-in config flag**. Models: **only `mimo-v2.6-flash-free`, `beam-free`, `jev-1.13-free`** (OpenCode
+Zen free tier and Go). Jev comes from OpenCode, not from a separate TypeSafe key.
 
 Superseded in v2: the "one opencode server for all guilds" idea and the TypeSafe-SDK Jev integration. Both
 were contradicted by measurement (see §0).
@@ -186,17 +186,17 @@ sequenceDiagram
 
 ## 3. Model policy
 
-Roles, not model names: `MODEL_PRIMARY`, `MODEL_FAST`, `MODEL_JEV` in `.env`, each defaulting to the OpenCode
-Go pair below. A `provider/model` id is validated by matching the longest **known provider id** (`models.ts`
+Roles, not model names: `MODEL_PRIMARY`, `MODEL_FAST`, `MODEL_JEV` in `.env`, each with the defaults in the
+table below. A `provider/model` id is validated by matching the longest **known provider id** (`models.ts`
 → `providers.ts`): the provider must have a credential or be declared, so a typo fails at `/model set` and in
 `doctor` instead of at answer time, while any model the provider serves stays usable. `MODEL_ALLOWLIST`
 restores the old hard pin for deployments that want it.
 
-| Role                                                   | Model (default)                  | Notes                                                                                                  |
-| ------------------------------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Primary agent (chat, code, tool use)                   | `opencode-go/crouton-alpha-free` | 1M context; overridable per guild with `/model set`, which the runtime resolves per prompt             |
-| Fast/secondary (title gen, summaries, vision-ish jobs) | `opencode-go/beam-free`          | used for reflection and consolidation to keep the big model free of bulk text                          |
-| Typed decisions (safety, routing, eval judging)        | `jev-1.13-free`                  | Zen systemone endpoint; returns labels + probabilities, never text; called directly, so no provider id |
+| Role                                                   | Model (default)                 | Notes                                                                                                  |
+| ------------------------------------------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Primary agent (chat, code, tool use)                   | `opencode/mimo-v2.6-flash-free` | keyless free tier; overridable per guild with `/model set`, which the runtime resolves per prompt      |
+| Fast/secondary (title gen, summaries, vision-ish jobs) | `opencode-go/beam-free`         | used for reflection and consolidation to keep the big model free of bulk text                          |
+| Typed decisions (safety, routing, eval judging)        | `jev-1.13-free`                 | Zen systemone endpoint; returns labels + probabilities, never text; called directly, so no provider id |
 
 Providers (§3.4) are two kinds: catalogue ids the pinned server already knows (`openai`, `anthropic`,
 `google`, `openrouter`, `deepseek`, `groq`, `mistral`, `xai`, `cerebras`, `togetherai`, `opencode-go`,
@@ -232,7 +232,7 @@ No `@typesafe-ai/sdk` dependency: the endpoint is plain JSON, and the SDK assume
 
 ## 4. Permission system — five layers, fail closed
 
-The ceiling table is now *data*: `policy.matrix.<rank>.<risk>` overrides any single cell per guild, and
+The ceiling table is now _data_: `policy.matrix.<rank>.<risk>` overrides any single cell per guild, and
 `policy.mode` picks what an `ask` becomes — a card (`ask`), a Jev-screened run (`vibe`), or a refusal above
 `read` (`locked`). Settings are scope-checked in `policy/settings.ts`: sandbox, the matrix, tool allow-lists and
 role lists are bot-owner only, so a guild admin cannot widen what the agent may do. Vibe's verdict is a pure
@@ -408,7 +408,7 @@ Prettier, and Bun scripts (`dev`, `start`, `build`, `typecheck`, `lint`, `format
 | Global `opencode` upgrade by you                                                                 | none to the bot, but confusion      | README states the bot has its own copy; `npm run doctor` reports both versions                                                                                                          |
 | Config/tool discovery tied to server cwd                                                         | wrong config for a guild            | supervisor spawns per workspace; a boot self-test asserts the workspace config is loaded and the bridge tool id is present                                                              |
 | SDK event types lag the server (`permission.updated` in types vs `permission.asked` on the wire) | approvals silently never fire       | all raw events pass through one adapter (`src/agent/events.ts`) that maps observed names, never SDK type names; boot self-test asserts an ask round-trip before the bot reports healthy |
-| Free-tier model availability changes                                                             | prompts fail                        | allowlist in config with ordered fallback (`crouton-alpha-free` → `beam-free`), explicit error to Discord, never silent model swap outside the allowlist                                |
+| Free-tier model availability changes                                                             | prompts fail                        | allowlist in config with ordered fallback (`mimo-v2.6-flash-free` → `beam-free`), explicit error to Discord, never silent model swap outside the allowlist                              |
 | Jev token expiry / refresh failure                                                               | no dynamic gate                     | refresh flow; degrade to human approval; jev answers logged for calibration                                                                                                             |
 | Docker unavailable (Windows/WSL, no daemon)                                                      | shell cannot run                    | `shell.mode` flag; `.env` override to `host` with a warning banner in `/status`; deny-list still applies                                                                                |
 | Prompt injection (Discord text, repo files)                                                      | hijacked actions                    | identity from channel binding; risk classes; jev injection question; immutable config; destructive ops human-approved                                                                   |
@@ -421,13 +421,13 @@ Prettier, and Bun scripts (`dev`, `start`, `build`, `typecheck`, `lint`, `format
 
 ## 10. Decisions (resolved)
 
-| Question           | Answer                                                                                                                        |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| Tenancy            | multi-guild architecture, one server today (§1.1)                                                                             |
-| Shell blast radius | `docker` default, `host` optional per guild config                                                                            |
-| Jev source         | OpenCode Zen systemone endpoint, `jev-1.13-free`, console OAuth token (§3.3)                                                  |
-| Models             | allowlist of exactly `crouton-alpha-free`, `beam-free`, `jev-1.13-free`; primary = crouton, reflector = beam, decisions = jev |
-| SDK pinning        | CLI + SDK both 1.19.5 as project deps, own data dir (§0.2)                                                                    |
+| Question           | Answer                                                                                                                       |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Tenancy            | multi-guild architecture, one server today (§1.1)                                                                            |
+| Shell blast radius | `docker` default, `host` optional per guild config                                                                           |
+| Jev source         | OpenCode Zen systemone endpoint, `jev-1.13-free`, console OAuth token (§3.3)                                                 |
+| Models             | allowlist of exactly `mimo-v2.6-flash-free`, `beam-free`, `jev-1.13-free`; primary = mimo, reflector = beam, decisions = jev |
+| SDK pinning        | CLI + SDK both 1.19.5 as project deps, own data dir (§0.2)                                                                   |
 
 Setup inputs still needed from you (not blocking design): Discord application client ID + bot token with
 `GuildMembers` and `MessageContent` enabled, and the guild ID to seed `config/guilds.json`.

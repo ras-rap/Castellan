@@ -2,8 +2,8 @@
 
 A Discord-native agent that answers in chat **and acts** — creates channels, reads the member list, manages
 roles, writes code — on an opencode backend. Any model from any provider it is given a credential for: the
-OpenCode Go subscription by default, or OpenAI, Anthropic, Gemini, OpenRouter, a local Ollama/vLLM endpoint, or
-anything else that speaks the OpenAI API.
+keyless OpenCode free tier by default, the OpenCode Go subscription, or OpenAI, Anthropic, Gemini, OpenRouter,
+a local Ollama/vLLM endpoint, or anything else that speaks the OpenAI API.
 
 Built on the [`discord-bot-template`](https://github.com/ras-rap/discord-bot-template/tree/rewrite) conventions:
 discordx decorators discovered by `@discordx/importer`, reusable guards, pino logging, a command-registration
@@ -23,7 +23,7 @@ per-guild model selection and the learning loop with its A/B eval gate are imple
 | Bun ≥ 1.1 | runtime (`bun:sqlite`, `Bun.spawn`, `Bun.serve`) |
 | A Discord bot token | Dev Portal → your app → Bot → Reset Token |
 | `GuildMembers` + `MessageContent` intents | member listing, and reading what a mention actually says |
-| One model provider | default is the OpenCode Go subscription (`bun run auth`); a plain API key works too |
+| One model provider | default is the keyless OpenCode free tier; `bun run auth` adds the Go subscription; a plain API key works too |
 | Docker daemon | default shell sandbox; `shell.mode: "host"` opts out per guild |
 
 ## Quick start
@@ -31,7 +31,7 @@ per-guild model selection and the learning loop with its A/B eval gate are imple
 ```bash
 bun install
 bun run setup          # validates the token, picks a provider, writes .env, publishes the commands
-bun run auth           # only for the default OpenCode Go models: stores the credential Go accepts
+bun run auth           # for the OpenCode Go models (the default fast model): stores the credential Go accepts
 bun run doctor         # preflight: binary, token, providers, role models, docker, clock skew
 bun run start          # run the bot
 ```
@@ -60,7 +60,7 @@ The bot asks for **roles**, never for a model name:
 
 | Role | Env | Default | Used for |
 | --- | --- | --- | --- |
-| primary | `MODEL_PRIMARY` | `opencode-go/crouton-alpha-free` | chat, code, tool use |
+| primary | `MODEL_PRIMARY` | `opencode/mimo-v2.6-flash-free` | chat, code, tool use |
 | fast | `MODEL_FAST` | `opencode-go/beam-free` | reflection, memory extraction, consolidation |
 | jev | `MODEL_JEV` | `jev-1.13-free` | typed safety decisions (called directly, so no `provider/` prefix) |
 
@@ -80,7 +80,7 @@ the server itself reads, so a key stored under another name is ignored.
 | Provider id | Credential | Example model |
 | --- | --- | --- |
 | `opencode-go` | `bun run auth` (or `OPENCODE_GO_API_KEY`) | `opencode-go/gpt-5.6-luna` |
-| `opencode` | keyless free tier | `opencode/beam-free` |
+| `opencode` | keyless free tier | `opencode/mimo-v2.6-flash-free` |
 | `openai` | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet-4-5` |
 | `google` | `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-2.5-pro` |
@@ -322,12 +322,12 @@ capability, rewrite the rank table, or widen what bypasses approval — those ne
 `/config reset` restores the schema default exactly (empty containers included), and every value is validated
 before the write, so a typo leaves the file untouched.
 
-Models run wherever `.env` points them. The default is the **OpenCode Go** subscription: provider
-`opencode-go`, base URL `https://opencode.ai/inference/go`, authenticated with a Console API key (`oc_sk_...`)
-that the supervisor injects as `OPENCODE_GO_API_KEY`. Go is a different endpoint from the free tier — a
-keyless/free call answers "Free usage exceeded, subscribe to Go", which is what `bun run doctor` checks
-explicitly (`go subscription`). When a role names another provider, `doctor` skips that check instead of
-reporting a failure.
+Models run wherever `.env` points them. The default **primary** is the keyless free tier; the default
+**fast** model runs on the **OpenCode Go** subscription: provider `opencode-go`, base URL
+`https://opencode.ai/inference/go`, authenticated with a Console API key (`oc_sk_...`) that the supervisor
+injects as `OPENCODE_GO_API_KEY`. Go is a different endpoint from the free tier — a keyless/free call answers
+"Free usage exceeded, subscribe to Go", which is what `bun run doctor` checks explicitly (`go subscription`).
+When no role runs on Go, `doctor` skips that check instead of reporting a failure.
 
 `JEV_MODE=shadow` (default) logs Jev's reading of every non-read call while the tier table still decides;
 `enforce` lets Jev auto-allow high-confidence low-risk calls and deny anything it rates catastrophic or

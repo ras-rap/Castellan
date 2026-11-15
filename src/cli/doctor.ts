@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 
 import { assertPinnedBinary } from '@services/agent/binary.ts';
-import { effectiveModel, knownProviderIds, modelAllowlist, modelRef } from '@services/agent/models.ts';
+import { effectiveModel, goProbeModel, knownProviderIds, modelAllowlist, modelRef } from '@services/agent/models.ts';
 import { providerSummary, providersFilePath } from '@services/agent/providers.ts';
 import { capabilities } from '@services/bridge/capabilities.ts';
 import { GO_CHAT_ENDPOINT, config, paths } from '@services/config.ts';
@@ -129,8 +129,8 @@ async function main(): Promise<void> {
   // Go and the free tier are different endpoints; this proves the stored credential is entitled to the models
   // the bot actually uses, instead of discovering "Free usage exceeded, subscribe to Go" at answer time. It is
   // only meaningful when a role actually runs on Go, so another provider's deployment never sees a red line.
-  const usesGo = [effectiveModel('primary').id, effectiveModel('fast').id].some(id => id.startsWith('opencode-go/'));
-  if (token && usesGo)
+  const goModel = goProbeModel();
+  if (token && goModel)
     try {
       const response = await fetch(GO_CHAT_ENDPOINT, {
         'method': 'POST',
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
           'x-opencode-session': `ses_doctor_${Date.now()}`,
         },
         'body': JSON.stringify({
-          'model': 'crouton-alpha-free',
+          'model': goModel,
           'messages': [{ 'role': 'user', 'content': 'ok' }],
           'max_tokens': 16,
         }),

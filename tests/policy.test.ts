@@ -35,9 +35,9 @@ describe('session policy', () => {
 
 describe('model refs', () => {
   test('splits provider and model for a role default', () => {
-    expect(modelRef('opencode-go/crouton-alpha-free')).toEqual({
-      'providerID': 'opencode-go',
-      'modelID': 'crouton-alpha-free',
+    expect(modelRef('opencode/mimo-v2.6-flash-free')).toEqual({
+      'providerID': 'opencode',
+      'modelID': 'mimo-v2.6-flash-free',
     });
   });
 

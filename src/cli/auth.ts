@@ -1,6 +1,7 @@
 import { chmodSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 
+import { goProbeModel } from '@services/agent/models.ts';
 import { paths } from '@services/config.ts';
 import { OPENCODE_CLI } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
@@ -94,7 +95,7 @@ async function probeGo(candidate: Candidate): Promise<{ ok: boolean; status: num
         'x-opencode-session': `ses_auth_${Date.now()}`,
       },
       'body': JSON.stringify({
-        'model': 'crouton-alpha-free',
+        'model': goProbeModel() ?? 'beam-free',
         'messages': [{ 'role': 'user', 'content': 'ok' }],
         'max_tokens': 16,
       }),
