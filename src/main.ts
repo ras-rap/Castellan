@@ -6,6 +6,7 @@ import { startBridge } from '@services/bridge/server.ts';
 import { services } from '@services/discord/services.ts';
 import { writeDigest } from '@services/memory/inject.ts';
 import { memory } from '@services/memory/store.ts';
+import { startWebFromEnv } from '@services/web/server.ts';
 import { AUTO_REGISTER_COMMANDS, DISCORD_TOKEN, IS_PRODUCTION, NODE_ENV, assertRuntimeEnv } from '@utils/env.ts';
 import { acquireInstanceLock } from '@utils/instance-lock.ts';
 import { log } from '@utils/logger.ts';
@@ -30,16 +31,23 @@ async function main() {
   services.set({ client, supervisor, runtime, 'memoryStore': memory, writeDigest });
 
   const bridge = startBridge(client);
+  const web = startWebFromEnv();
   await supervisor.start();
   const scheduler = new Scheduler(supervisor);
   scheduler.start();
-  logger.info('runtime ready', { 'env': NODE_ENV, 'production': IS_PRODUCTION, 'bridge': bridge.port ?? 0 });
+  logger.info('runtime ready', {
+    'env': NODE_ENV,
+    'production': IS_PRODUCTION,
+    'bridge': bridge.port ?? 0,
+    'web': web?.port ?? 'off',
+  });
 
   if (AUTO_REGISTER_COMMANDS) await syncCommands();
 
   const shutdown = async (signal: string) => {
     logger.info('shutting down', { signal });
     bridge.stop(true);
+    web?.stop(true);
     scheduler.stop();
     await supervisor.stopAll();
     client.destroy();

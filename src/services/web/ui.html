@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>open-discord-agent · control</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f1115;
+        --panel: #171a21;
+        --line: #262b36;
+        --fg: #e6e8ec;
+        --muted: #9aa3b2;
+        --accent: #4f8cff;
+        --ok: #2fbf71;
+        --warn: #d9a52b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 2rem 1.25rem 4rem;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 62rem; margin: 0 auto; }
+      h1 { font-size: 1.15rem; margin: 0 0 0.25rem; letter-spacing: 0.01em; }
+      h2 { font-size: 1rem; margin: 1.75rem 0 0.5rem; }
+      h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 1.25rem 0 0.5rem; }
+      .muted { color: var(--muted); }
+      .row { display: flex; gap: 0.75rem; align-items: baseline; flex-wrap: wrap; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; margin-top: 0.75rem; }
+      table { width: 100%; border-collapse: collapse; }
+      td, th { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font-weight: 600; color: var(--muted); font-size: 0.8rem; }
+      td.path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; white-space: nowrap; }
+      td.desc { color: var(--muted); font-size: 0.82rem; }
+      input[type="text"], select, textarea {
+        background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
+        padding: 0.3rem 0.45rem; font: inherit; min-width: 10rem;
+      }
+      textarea { width: 100%; min-height: 8rem; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+      button {
+        background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 0.35rem 0.7rem;
+        font: inherit; cursor: pointer;
+      }
+      button.ghost { background: transparent; border: 1px solid var(--line); color: var(--fg); }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      .guild { display: flex; gap: 0.6rem; align-items: center; padding: 0.4rem 0.6rem; border: 1px solid var(--line);
+        border-radius: 8px; margin-top: 0.4rem; cursor: pointer; background: transparent; color: var(--fg); }
+      .guild[data-active="true"] { border-color: var(--accent); }
+      .pill { font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+      .pill.ok { color: var(--ok); border-color: var(--ok); }
+      .pill.warn { color: var(--warn); border-color: var(--warn); }
+      .save { min-width: 4.5rem; }
+      .status { min-height: 1.2rem; font-size: 0.82rem; color: var(--muted); }
+      code { font-family: ui-monospace, monospace; font-size: 0.85em; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>open-discord-agent <span class="muted">control panel</span></h1>
+      <div class="row">
+        <span id="who" class="muted">checking your session…</span>
+        <span id="role" class="pill hidden"></span>
+        <button id="signout" class="ghost hidden">sign out</button>
+      </div>
+      <div id="status" class="status"></div>
+
+      <section id="app" class="hidden">
+        <h2>Servers</h2>
+        <p class="muted" id="scope-note"></p>
+        <div id="guilds"></div>
+
+        <section id="detail" class="hidden">
+          <h2 id="detail-name">Server</h2>
+          <div class="row">
+            <span class="muted" id="detail-id"></span>
+            <span id="detail-enabled" class="pill"></span>
+            <span class="muted" id="detail-why"></span>
+          </div>
+          <div id="groups"></div>
+
+          <h2>Per-account permissions</h2>
+          <div class="card">
+            <p class="muted">
+              <code>blocked</code>: accounts the bot ignores. <code>users</code>: one profile per account —
+              <code>rank</code>, <code>risk</code>, <code>tools.allow/deny</code>, <code>commands.allow/deny</code>.
+            </p>
+            <textarea id="access-json" spellcheck="false"></textarea>
+            <div class="row" style="margin-top: 0.6rem">
+              <button id="access-save" class="save">save access</button>
+              <span class="status" id="access-status"></span>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script>window.__CLERK_PUBLISHABLE_KEY__ = '__CLERK_KEY__';</script>
+    <script type="module">
+      // Clerk is loaded from the Frontend API encoded in the publishable key the server was started with.
+      const clerkKey = window.__CLERK_PUBLISHABLE_KEY__ ?? '';
+      let clerk = null;
+      let token = '';
+      let me = null;
+      let active = '';
+
+      const $ = id => document.getElementById(id);
+      const say = (message, kind = 'muted') => {
+        const el = $('status');
+        el.textContent = message;
+        el.style.color = kind === 'error' ? 'var(--warn)' : 'var(--muted)';
+      };
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            'content-type': 'application/json',
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+            ...(options.headers ?? {}),
+          },
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.detail ?? body.error ?? `HTTP ${response.status}`);
+        return body;
+      }
+
+      function control(entry) {
+        if (entry.kind === 'boolean') {
+          const select = document.createElement('select');
+          for (const value of ['true', 'false']) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            if (String(entry.value) === value) option.selected = true;
+            select.append(option);
+          }
+          return select;
+        }
+        if (entry.kind === 'choice' && entry.choices.length > 0) {
+          const select = document.createElement('select');
+          for (const value of entry.choices) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            if (String(entry.value) === value) option.selected = true;
+            select.append(option);
+          }
+          return select;
+        }
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = entry.placeholder || (entry.kind === 'list' ? 'comma separated' : '');
+        input.value = Array.isArray(entry.value) ? entry.value.join(', ') : entry.value === null ? '' : String(entry.value);
+        return input;
+      }
+
+      function renderGroups(groups) {
+        const host = $('groups');
+        host.replaceChildren();
+        for (const group of groups) {
+          const heading = document.createElement('h3');
+          heading.textContent = group.category;
+          host.append(heading);
+
+          const card = document.createElement('div');
+          card.className = 'card';
+          const table = document.createElement('table');
+          table.innerHTML = '<thead><tr><th>key</th><th>value</th><th></th></tr></thead>';
+          const tbody = document.createElement('tbody');
+
+          for (const entry of group.entries) {
+            const tr = document.createElement('tr');
+
+            const name = document.createElement('td');
+            name.className = 'path';
+            name.textContent = entry.label;
+            name.title = entry.path;
+
+            const value = document.createElement('td');
+            const input = control(entry);
+            input.disabled = !entry.editable;
+            value.append(input);
+            const hint = document.createElement('div');
+            hint.className = 'desc';
+            hint.textContent = entry.editable ? entry.description : `${entry.description} — ${entry.reason}`;
+            value.append(hint);
+
+            const action = document.createElement('td');
+            const save = document.createElement('button');
+            save.className = 'save';
+            save.textContent = 'save';
+            save.disabled = !entry.editable;
+            save.onclick = async () => {
+              save.disabled = true;
+              try {
+                const raw = Array.isArray(input.value) ? input.value.join(',') : input.value;
+                await api(`/api/guilds/${active}`, { method: 'PATCH', body: JSON.stringify({ path: entry.path, raw }) });
+                say(`saved ${entry.path}`);
+                await openGuild(active);
+              } catch (error) {
+                say(String(error.message ?? error), 'error');
+                save.disabled = false;
+              }
+            };
+            action.append(save);
+
+            tr.append(name, value, action);
+            tbody.append(tr);
+          }
+
+          table.append(tbody);
+          card.append(table);
+          host.append(card);
+        }
+      }
+
+      async function openGuild(id) {
+        active = id;
+        const detail = await api(`/api/guilds/${id}`);
+        $('detail').classList.remove('hidden');
+        $('detail-name').textContent = detail.guild.name ?? id;
+        $('detail-id').textContent = id;
+        const enabled = $('detail-enabled');
+        enabled.textContent = detail.guild.enabled ? 'approved' : 'not approved';
+        enabled.className = `pill ${detail.guild.enabled ? 'ok' : 'warn'}`;
+        $('detail-why').textContent = detail.canEdit.allowed
+          ? `you are editing as: ${detail.canEdit.reason}`
+          : detail.canEdit.reason;
+        renderGroups(detail.groups);
+
+        const access = await api(`/api/guilds/${id}/access`).catch(() => undefined);
+        const area = $('access-json');
+        area.value = access ? JSON.stringify(access.access, null, 2) : '{}';
+        area.disabled = !access?.canEdit.allowed;
+        $('access-save').disabled = !access?.canEdit.allowed;
+        $('access-status').textContent = access?.canEdit.allowed ? '' : (access?.canEdit.reason ?? '');
+
+        for (const button of document.querySelectorAll('.guild')) button.dataset.active = String(button.dataset.id === id);
+      }
+
+      async function boot() {
+        if (!clerkKey) {
+          say('CLERK_PUBLISHABLE_KEY is not configured on the server, so sign-in is disabled.', 'error');
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+        script.async = true;
+        script.crossOrigin = 'anonymous';
+        script.onload = async () => {
+          clerk = window.Clerk;
+          await clerk.load({ publishableKey: clerkKey });
+          if (!clerk.user) {
+            clerk.openSignIn({});
+            say('sign in to continue');
+            clerk.addListener(async ({ user }) => {
+              if (user) await signedIn();
+            });
+            return;
+          }
+          await signedIn();
+        };
+        script.onerror = () => say('could not load Clerk from the CDN', 'error');
+        document.head.append(script);
+      }
+
+      async function signedIn() {
+        token = (await clerk.session?.getToken()) ?? '';
+        if (!token) {
+          say('signed in but there is no session token — check the Clerk session settings', 'error');
+          return;
+        }
+        try {
+          me = await api('/api/me');
+        } catch (error) {
+          say('this page is not allowed to read the dashboard', 'error');
+          $('who').textContent = clerk.user?.primaryEmailAddress?.emailAddress ?? '';
+          return;
+        }
+
+        $('who').textContent = me.email ?? 'signed in';
+        const role = $('role');
+        role.className = 'pill ok';
+        role.textContent = me.role === 'owner' ? 'bot owner' : me.role === 'admin' ? 'full access' : 'server owner';
+        role.classList.remove('hidden');
+        $('signout').classList.remove('hidden');
+        $('signout').onclick = async () => {
+          await clerk.signOut();
+          location.reload();
+        };
+        $('scope-note').textContent =
+          me.role === 'guild'
+            ? 'You manage the servers below. Bot-wide settings (shell sandbox, models, git, panel, roles, /enable, approvals bypass) stay with the bot owner.'
+            : 'Full control: every server and every bot-wide setting.';
+        $('app').classList.remove('hidden');
+
+        const host = $('guilds');
+        host.replaceChildren();
+        for (const guild of me.guilds) {
+          const button = document.createElement('button');
+          button.className = 'guild';
+          button.dataset.id = guild.id;
+          const name = document.createElement('strong');
+          name.textContent = guild.name;
+          const state = document.createElement('span');
+          state.className = `pill ${guild.enabled ? 'ok' : 'warn'}`;
+          state.textContent = guild.enabled ? 'approved' : 'not approved';
+          button.append(name, state);
+          button.onclick = () => openGuild(guild.id).catch(error => say(String(error.message ?? error), 'error'));
+          host.append(button);
+        }
+        if (me.guilds.length === 0) say('no servers are linked to your account yet');
+        else say('');
+        if (me.guilds.length > 0) await openGuild(me.guilds[0].id);
+      }
+
+      $('access-save').onclick = async () => {
+        try {
+          const parsed = JSON.parse($('access-json').value);
+          await api(`/api/guilds/${active}/access`, { method: 'PUT', body: JSON.stringify(parsed) });
+          $('access-status').textContent = 'saved';
+        } catch (error) {
+          $('access-status').textContent = String(error.message ?? error);
+        }
+      };
+
+      boot();
+    </script>
+  </body>
+</html>

@@ -595,6 +595,57 @@ There is deliberately **no delete**: no tool removes a server, a user, a node or
 from `.env` (never `config/guilds.json`), never logged, and every error message is passed through `redact` before
 it reaches the model.
 
+## Web dashboard (Clerk)
+
+An optional browser surface over the same settings, for people who would rather click than type slash commands.
+Identity is Clerk; permissions are **not** Clerk roles — they are a people list you control, and the default is
+nothing.
+
+```bash
+# .env
+WEB_PORT=8080
+CLERK_PUBLISHABLE_KEY=pk_test_…      # the Frontend API host is encoded in this key, so no second URL
+WEB_OWNER_EMAILS=you@example.com     # additive to config/web.json
+WEB_ADMIN_EMAILS=                     # "certain people given perms", same rights as the owner
+```
+
+```jsonc
+// config/web.json — who is who. Credentials are never here, only people.
+{
+  "owners": ["you@example.com"],                 // full control, everything
+  "admins": ["helper@example.com"],              // full control too
+  "links": { "user_2abc…": "123456789012345678" }, // Clerk user id → Discord id: that Discord account's servers
+  "guilds": { "1568699957…": ["mod@example.com"] } // extra people per server, without a Discord link
+}
+```
+
+| Role | Sees | Can change |
+| --- | --- | --- |
+| **bot owner** (`owners`) | every server | everything, bot-wide included |
+| **granted** (`admins`) | every server | everything, bot-wide included |
+| **server owner** (Discord owner of an **approved** server, via `links`, or listed in `guilds`) | their servers | that server's guild-scoped settings and its per-account access |
+| **anyone else** | nothing | nothing (the API answers 403, the page shows nothing) |
+
+Bot-wide means the machine and the credentials, so a server owner cannot touch them: `shell.*` (docker vs host),
+`model.*`, `git.*`, `pterodactyl.*`, `roles.*`, `enabled` (that is the *approval* flag — an unapproved server's
+owner gets nothing) and `policy.tools.allow` (which skips every approval card). Everything else — `features.*`,
+`policy.mode`, `policy.vibe.*`, `policy.review.*`, `policy.matrix.*`, `access.*` — is theirs, on their server only.
+
+How it is built:
+
+- `services/web/auth.ts` — Clerk session tokens verified with WebCrypto (RS256 against the issuer's published
+  JWKS, issuer + `exp`/`nbf` checked, one retry on key rotation). No key, no session: `undefined` and a 401.
+- `services/web/principals.ts` — `config/web.json` → `owner | admin | guild | nobody`, plus the bot-wide rule.
+- `services/web/server.ts` — `GET /api/me`, `GET /api/guilds/:id`, `PATCH /api/guilds/:id`,
+  `GET|PUT /api/guilds/:id/access`; every request re-verifies the token and every write goes through the same
+  `applySetting` the Discord commands use, with `actor: web:<email>` in the log.
+- `services/web/ui.html` — one page, no build step: guild list, settings grouped by category with the control that
+  matches the value type (checkbox/select/text), bot-wide rows disabled with the reason, and a JSON box for
+  per-account access profiles.
+
+The dashboard is off unless `WEB_PORT` and `CLERK_PUBLISHABLE_KEY` are both set (`startWebFromEnv` returns
+`undefined` and logs why). It binds `0.0.0.0` — put it behind the same TLS reverse proxy as anything else.
+
 ## Ops (Linux VM)
 
 ```bash

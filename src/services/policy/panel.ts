@@ -13,6 +13,8 @@ import {
   type Setting,
 } from './settings.ts';
 
+import type { Supervisor } from '@services/agent/supervisor.ts';
+
 const logger = log('policy/panel');
 
 /** `policy.matrix` is not a setting: it is the entry point for the 20 rank × risk cells. */
@@ -22,19 +24,24 @@ export type ApplyResult =
   { ok: true; next: GuildSettings; value: string; reloaded: boolean } | { ok: false; error: string };
 
 /**
- * The single write path for both `/config set` and the `/settings` panel: scope check, parse, write, and the
- * server reload that feature switches need. Keeping it here is what stops the two surfaces from drifting.
+ * The single write path for `/config set`, the `/settings` panel and the web dashboard: scope check, parse,
+ * write, and the server reload that feature switches need. The dashboard passes its own `authorize` because it
+ * decides by Clerk principal rather than by Discord rank.
  */
 export async function applySetting(input: {
   guildId: string;
   userId: string;
   path: string;
   raw: string | undefined;
+  /** Replaces the Discord scope check when the caller has already authorised (the dashboard does). */
+  authorize?: (setting: Setting) => boolean;
+  /** What the log line should say the actor was, e.g. `web:a@b.c`. */
+  actor?: string;
 }): Promise<ApplyResult> {
   const setting = settingByPath(input.path);
   if (!setting) return { 'ok': false, 'error': `unknown setting \`${input.path}\`` };
-  if (!writableBy(setting, input.userId))
-    return { 'ok': false, 'error': `🔒 \`${setting.path}\` is bot-owner only (${setting.description}).` };
+  const allowed = input.authorize ? input.authorize(setting) : writableBy(setting, input.userId);
+  if (!allowed) return { 'ok': false, 'error': `🔒 \`${setting.path}\` is bot-owner only (${setting.description}).` };
 
   let parsed: unknown;
   try {
@@ -48,15 +55,23 @@ export async function applySetting(input: {
   config.patchGuild(input.guildId, { ...next });
   logger.info(input.raw === undefined ? 'config reset' : 'config changed', {
     'guildId': input.guildId,
-    'by': input.userId,
+    'by': input.actor ?? input.userId,
     'key': setting.path,
     'value': parsed,
   });
 
+  // Feature switches re-render the workspace, so the guild's server has to respawn to pick them up. When the
+  // bot is not running (tests, CLI) there is nothing to stop and nothing to warn about.
   let reloaded = false;
-  if (setting.path.startsWith('features.'))
+  let supervisor: Supervisor | undefined;
+  try {
+    supervisor = services.get().supervisor;
+  } catch {
+    supervisor = undefined;
+  }
+  if (setting.path.startsWith('features.') && supervisor)
     try {
-      await services.get().supervisor.stop(input.guildId);
+      await supervisor.stop(input.guildId);
       reloaded = true;
     } catch (error) {
       logger.warn('server stop after feature change failed', {

@@ -1,0 +1,10 @@
+{
+  "owners": ["you@example.com"],
+  "admins": ["helper@example.com"],
+  "links": {
+    "user_2abcDEFghiJKL": "123456789012345678"
+  },
+  "guilds": {
+    "1568699998957211688": ["mod@example.com"]
+  }
+}

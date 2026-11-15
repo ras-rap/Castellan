@@ -46,6 +46,15 @@ export const PTERO_CLIENT_KEY = optional('PTERO_CLIENT_KEY');
 export const PTERO_ADMIN_KEY = optional('PTERO_ADMIN_KEY');
 export const PTERO_BASE_URL = optional('PTERO_BASE_URL');
 
+/**
+ * Web dashboard. `CLERK_PUBLISHABLE_KEY` also tells the server where Clerk lives (the publisher key encodes the
+ * Frontend API host), so no second URL is needed. The email lists are additive to `config/web.json`.
+ */
+export const WEB_PORT = Number(optional('WEB_PORT') ?? 0);
+export const CLERK_PUBLISHABLE_KEY = optional('CLERK_PUBLISHABLE_KEY');
+export const WEB_OWNER_EMAILS = optional('WEB_OWNER_EMAILS');
+export const WEB_ADMIN_EMAILS = optional('WEB_ADMIN_EMAILS');
+
 export type EnvKey = 'DISCORD_TOKEN' | 'DISCORD_CLIENT_ID' | 'OWNER_ID';
 
 const values: Record<EnvKey, string> = { DISCORD_TOKEN, DISCORD_CLIENT_ID, OWNER_ID };
