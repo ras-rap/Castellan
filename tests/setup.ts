@@ -5,5 +5,9 @@ process.env.REVIEW_MODE = 'off';
 // A fake git server: the suite builds requests against it and pushes to a local bare repo, never over the network.
 process.env.GIT_TOKEN = 'test-token';
 process.env.GIT_BASE_URL = 'https://git.test';
+// A fake panel: request shapes are asserted, nothing is dialled.
+process.env.PTERO_CLIENT_KEY = 'ptlc_test';
+process.env.PTERO_ADMIN_KEY = 'ptla_test';
+process.env.PTERO_BASE_URL = 'https://panel.test';
 // The turn watchdog is silence-based (10 min by default); the runtime test must not wait for that.
 process.env.IDLE_TIMEOUT_MS = '120';

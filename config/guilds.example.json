@@ -53,6 +53,15 @@
       "createRepos": false,
       "visibility": "private"
     },
+    "pterodactyl": {
+      "enabled": true,
+      "baseUrl": "https://panel.example.com",
+      "admin": false,
+      "files": false,
+      "servers": [
+        "d3aac109"
+      ]
+    },
     "policy": {
       "mode": "vibe",
       "matrix": {

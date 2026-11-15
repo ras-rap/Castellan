@@ -5,6 +5,7 @@ import {
   isOwner,
   type GuildFeatures,
   type GuildPolicy,
+  type GuildPterodactyl,
   type UserAccess,
 } from '@services/config.ts';
 
@@ -152,6 +153,49 @@ export function shellRule(command: string): HardDecision | undefined {
   return hit ? { 'verdict': hit.verdict, 'layer': 'pattern', 'reason': `${hit.id}: ${hit.why}` } : undefined;
 }
 
+/** Client tools address a server by `identifier`; the admin pair addresses it by panel `id`. */
+const PTERO_SERVER_TOOLS = [
+  'ptero_server',
+  'ptero_power',
+  'ptero_command',
+  'ptero_files',
+  'ptero_file_read',
+  'ptero_file_write',
+  'ptero_admin_server',
+  'ptero_admin_suspend',
+];
+const PTERO_FILE_TOOLS = ['ptero_files', 'ptero_file_read', 'ptero_file_write'];
+
+/**
+ * Panel rules, all deterministic. The guild's switches decide whether the tools exist at all; this is what makes
+ * that true even for a client that still has an older tool list, and the allow-list is what keeps "one server"
+ * meaning one server instead of "whatever the API key can reach".
+ */
+function pterodactylRule(
+  capability: Capability,
+  args: Record<string, unknown>,
+  settings: { enabled: boolean; admin: boolean; files: boolean; servers: string[] } | undefined,
+): HardDecision | undefined {
+  if (!capability.name.startsWith('ptero_')) return undefined;
+  if (!settings?.enabled)
+    return { 'verdict': 'deny', 'layer': 'tools', 'reason': 'pterodactyl is not enabled in this server' };
+  if (capability.name.startsWith('ptero_admin_') && !settings.admin)
+    return { 'verdict': 'deny', 'layer': 'tools', 'reason': 'the panel admin tools are switched off here' };
+  if (PTERO_FILE_TOOLS.includes(capability.name) && !settings.files)
+    return { 'verdict': 'deny', 'layer': 'tools', 'reason': 'the panel file tools are switched off here' };
+
+  if (!PTERO_SERVER_TOOLS.includes(capability.name)) return undefined;
+  const server = typeof args.server === 'string' ? args.server : typeof args.id === 'string' ? args.id : '';
+  if (server.length === 0) return undefined;
+  if (settings.servers.length === 0) return undefined;
+  if (settings.servers.some(entry => entry.toLowerCase() === server.toLowerCase())) return undefined;
+  return {
+    'verdict': 'deny',
+    'layer': 'pattern',
+    'reason': `ptero-server: ${server} is not in this server's allow-list (${settings.servers.join(', ')})`,
+  };
+}
+
 /**
  * Fixed rule for the arguments of one capability call. These are the mistakes a model makes *despite* being
  * told the rules — banning the person who asked, deleting the channel the request came from, granting
@@ -161,7 +205,11 @@ function argumentRule(
   capability: Capability,
   args: Record<string, unknown>,
   protectedIds: readonly string[],
+  pterodactyl: HardInput['pterodactyl'],
 ): HardDecision | undefined {
+  const panel = pterodactylRule(capability, args, pterodactyl);
+  if (panel) return panel;
+
   if (capability.name === 'bash') {
     const command = typeof args.command === 'string' ? args.command : '';
     return shellRule(command);
@@ -200,6 +248,8 @@ export type HardInput = {
   account?: { blocked: boolean; profile?: UserAccess };
   /** The server owner and the bot's own user id: never valid moderation targets. */
   protectedIds?: readonly string[];
+  /** This guild's panel switches, so a stale client cannot use a tool the guild has since switched off. */
+  pterodactyl?: GuildPterodactyl;
 };
 
 /**
@@ -243,7 +293,7 @@ export function hardCheck(input: HardInput): HardDecision {
 
   // Argument rules sit between the lists and the allow-list on purpose: an owner who allow-lists `bash` for
   // everyone did not thereby allow `rm -rf /`.
-  const argument = argumentRule(capability, args, input.protectedIds ?? []);
+  const argument = argumentRule(capability, args, input.protectedIds ?? [], input.pterodactyl);
   if (argument) return argument;
 
   if (policy.tools.allow.includes(capability.name))

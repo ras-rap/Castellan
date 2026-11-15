@@ -38,6 +38,14 @@ export const GIT_TOKEN = optional('GIT_TOKEN');
 export const GIT_BASE_URL = optional('GIT_BASE_URL');
 export const GIT_OWNER = optional('GIT_OWNER');
 
+/**
+ * Pterodactyl panel credentials. `ptlc_…` is the client API (the servers that account owns), `ptla_…` is the
+ * application API (the whole panel). Per-guild switches decide which of them a guild may use.
+ */
+export const PTERO_CLIENT_KEY = optional('PTERO_CLIENT_KEY');
+export const PTERO_ADMIN_KEY = optional('PTERO_ADMIN_KEY');
+export const PTERO_BASE_URL = optional('PTERO_BASE_URL');
+
 export type EnvKey = 'DISCORD_TOKEN' | 'DISCORD_CLIENT_ID' | 'OWNER_ID';
 
 const values: Record<EnvKey, string> = { DISCORD_TOKEN, DISCORD_CLIENT_ID, OWNER_ID };

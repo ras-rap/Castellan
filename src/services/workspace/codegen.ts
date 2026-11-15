@@ -3,6 +3,10 @@ import { providerConfigBlocks } from '@services/agent/providers.ts';
 import { capabilities, setsOf, toolDisabled, type ParamSpec } from '@services/bridge/capabilities.ts';
 import { MODELS, config, type GuildFeatures } from '@services/config.ts';
 import { resolveForge } from '@services/git/forge.ts';
+import { resolvePtero } from '@services/pterodactyl/api.ts';
+
+/** The panel tools that only exist when `pterodactyl.files` is on. */
+const PANEL_FILE_TOOLS = ['ptero_files', 'ptero_file_read', 'ptero_file_write'];
 
 /** The guild's switches, resolved once per render; no guild means "deployment defaults" (tests, docs). */
 const featuresFor = (guildId?: string): GuildFeatures =>
@@ -66,12 +70,20 @@ export function renderDiscordToolFile(guildId?: string): string {
   const disabled = featuresFor(guildId).tools.disabled;
   const forge = guildId === undefined ? undefined : resolveForge(guildId);
   const createRepos = guildId !== undefined && config.git(guildId).createRepos;
+  const panel = guildId === undefined ? undefined : resolvePtero(guildId);
+  const panelSettings = guildId === undefined ? undefined : config.pterodactyl(guildId);
   const tools = capabilities
     .filter(capability => !toolDisabled(capability.name, disabled))
     .filter(capability => {
       if (guildId === undefined) return true;
       if (capability.name === 'git_push') return forge !== undefined;
       if (capability.name === 'git_repo_create') return forge !== undefined && createRepos;
+      // Panel tools exist only as far as the guild has switched them on: no panel, no admin, no files.
+      if (capability.name.startsWith('ptero_')) {
+        if (panel === undefined) return false;
+        if (capability.name.startsWith('ptero_admin_') && panelSettings?.admin !== true) return false;
+        if (PANEL_FILE_TOOLS.includes(capability.name) && panelSettings?.files !== true) return false;
+      }
       return true;
     })
     .map(capability => {
@@ -196,6 +208,25 @@ const gitSection = (guildId?: string): string => {
   return `\n${lines.join('\n')}\n`;
 };
 
+/** The panel is remote infrastructure: the persona states the allow-list so the model does not try to roam. */
+const panelSection = (guildId?: string): string => {
+  if (guildId === undefined) return '';
+  const panel = resolvePtero(guildId);
+  if (!panel) return '';
+  const settings = config.pterodactyl(guildId);
+  const scope =
+    settings.servers.length > 0
+      ? `Only these servers exist for you: ${settings.servers.join(', ')}. Anything else is refused before the request leaves the bot.`
+      : 'The allow-list is empty, so every server the panel key can see is reachable — name the exact server in every call.';
+  return `\n## Pterodactyl panel
+${scope}
+- Reads (\`ptero_servers\`, \`ptero_server\`) are free; \`ptero_power\`/\`ptero_command\` stop or type into a live server.
+${settings.files ? '- `ptero_files`/`ptero_file_read`/`ptero_file_write` exist here: writing a file is not undoable, so say which file before you do it.' : '- The file tools are off here: do not offer to edit files on a panel server.'}
+${settings.admin ? '- The application-API tools exist (whole-panel reads, suspend, user and server creation). They are `admin`-class: a human signs them.' : '- No application-API tools: you can only use the client API for the servers above.'}
+- There is no delete: no tool removes a server, a user or a file tree. If a request needs that, say so.
+`;
+};
+
 export function renderAgentsFile(guildName: string, guildId?: string): string {
   const features = featuresFor(guildId);
   const disabled = features.tools.disabled;
@@ -226,7 +257,7 @@ ${CLARIFY_DIRECTIVE[features.clarify].join('\n')}
 ## Style
 - Discord messages: short, skimmable, no walls of text. Code goes in fenced blocks with a language tag.
 - Report the outcome first, then the evidence (ids, paths, exit codes).
-${gitSection(guildId)}${switchedOff(disabled)}
+${gitSection(guildId)}${panelSection(guildId)}${switchedOff(disabled)}
 ## Memory
 \`\`MEMORY.md\`\` in this workspace holds durable facts about this server and its people. Trust it, but prefer
 fresh tool output when the two disagree, and say which one you used.

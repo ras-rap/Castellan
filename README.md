@@ -541,6 +541,50 @@ and every error message passes through `redact` before it reaches a log line or 
 `git_repo_create` creates a repository but never deletes one, and `attachOrigin` refuses to replace an existing
 `origin` — one workspace, one home for its history.
 
+### Pterodactyl panel (optional)
+
+Game-server control for the servers you already run. Two keys, two APIs, and a guild has to ask for each part:
+
+```bash
+# .env  — ptlc_… is the client API (that account's servers), ptla_… is the application API (the whole panel)
+PTERO_CLIENT_KEY=
+PTERO_ADMIN_KEY=
+PTERO_BASE_URL=https://panel.example.com
+```
+
+```
+/config set pterodactyl.enabled true                 # owner-only: remote infrastructure
+/config set pterodactyl.baseUrl https://panel.example.com
+/config set pterodactyl.servers d3aac109,7           # allow-list; empty = everything the key can see
+/config set pterodactyl.files false                  # read/overwrite files inside a server
+/config set pterodactyl.admin false                  # application API: whole-panel tools
+```
+
+| Tool | API | Risk | Exists when |
+| --- | --- | --- | --- |
+| `ptero_servers`, `ptero_server` | client | read | panel enabled |
+| `ptero_power` (start/stop/restart/kill), `ptero_command` (console) | client | destructive | panel enabled |
+| `ptero_files`, `ptero_file_read`, `ptero_file_write` | client | read / read / destructive | `pterodactyl.files` |
+| `ptero_admin_servers`, `ptero_admin_server`, `ptero_admin_users`, `ptero_admin_nodes`, `ptero_admin_nests` | application | read | `pterodactyl.admin` |
+| `ptero_admin_suspend`, `ptero_admin_user_create`, `ptero_admin_server_create` | application | destructive / **admin** | `pterodactyl.admin` |
+
+Gating is layered like everything else, and the hard layer is the authority:
+
+- **switches** — a tool the guild has not switched on is absent from the model's list *and* refused by `hardCheck`
+  (`layer: tools`), so an older tool list cannot reach it;
+- **allow-list** — `pterodactyl.servers` is checked in code before any request leaves the bot
+  (`layer: pattern`, reason starts `ptero-server:`), which is what keeps "one server" meaning one server;
+- **paths** — file paths must be absolute and cannot contain `..`, so a write cannot climb out of the server root;
+- **sets** — `features.tools.disabled: pterodactyl` hides the whole surface, `pterodactyl-admin` just the
+  application-API half;
+- **per-account** — the usual `access.users.<id>` profile (`risk: read` is "look, do not touch"); reads are
+  `read`, power/command/file-write/suspend are `destructive`, user and server creation are `admin`-class, so the
+  rank ceiling and `policy.matrix` apply unchanged.
+
+There is deliberately **no delete**: no tool removes a server, a user, a node or a file tree. The keys are read
+from `.env` (never `config/guilds.json`), never logged, and every error message is passed through `redact` before
+it reaches the model.
+
 ## Ops (Linux VM)
 
 ```bash

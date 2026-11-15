@@ -147,6 +147,24 @@ const GitSchema = z
   })
   .default({});
 
+/**
+ * Optional Pterodactyl panel. Keys live in `.env` (`PTERO_CLIENT_KEY` / `PTERO_ADMIN_KEY`); this says whether the
+ * guild may use them, which servers it may touch, and whether the file and admin tools exist at all.
+ */
+const PterodactylSchema = z
+  .object({
+    'enabled': z.boolean().default(false),
+    /** Scheme + host, e.g. `https://panel.example.com`; empty falls back to `PTERO_BASE_URL`. */
+    'baseUrl': z.string().default(''),
+    /** Enable the application-API tools (needs `PTERO_ADMIN_KEY`). Off by default: it is the whole panel. */
+    'admin': z.boolean().default(false),
+    /** Enable the file tools. Off by default: a write is arbitrary content inside a running server. */
+    'files': z.boolean().default(false),
+    /** Allow-list of server identifiers/uuids (client) or ids (admin). Empty means everything the key can see. */
+    'servers': z.array(z.string()).default([]),
+  })
+  .default({});
+
 const GuildConfigSchema = z.object({
   'enabled': z.boolean().default(false),
   'shell': z
@@ -165,6 +183,7 @@ const GuildConfigSchema = z.object({
   'features': FeatureSchema,
   'access': AccessSchema,
   'git': GitSchema,
+  'pterodactyl': PterodactylSchema,
 });
 
 export type GuildPolicy = z.infer<typeof PolicySchema>;
@@ -172,6 +191,7 @@ export type GuildFeatures = z.infer<typeof FeatureSchema>;
 export type UserAccess = z.infer<typeof UserAccessSchema>;
 export type GuildAccess = z.infer<typeof AccessSchema>;
 export type GuildGit = z.infer<typeof GitSchema>;
+export type GuildPterodactyl = z.infer<typeof PterodactylSchema>;
 
 /** Every default in one object, so `/config reset` restores exactly what the schema says. */
 export const guildDefaults = (): GuildSettings => GuildConfigSchema.parse({});
@@ -237,6 +257,8 @@ export const config = {
   'access': (id: string): GuildAccess => GuildConfigSchema.parse(readGuilds()[id] ?? {}).access,
   /** Git server switches (credentials come from `.env`, never from this file). */
   'git': (id: string): GuildGit => GuildConfigSchema.parse(readGuilds()[id] ?? {}).git,
+  /** Panel switches for this guild (keys again from `.env`). */
+  'pterodactyl': (id: string): GuildPterodactyl => GuildConfigSchema.parse(readGuilds()[id] ?? {}).pterodactyl,
   paths,
   'raw': () => readGuilds(),
   'guild': (id: string): GuildSettings | undefined => readGuilds()[id],

@@ -267,7 +267,16 @@ export async function decide(
     'profile': member === null ? undefined : guild.access.users[member.id],
   };
 
-  const hard = hardCheck({ tier, capability, args, policy, features, account, 'protectedIds': deps.protectedIds });
+  const hard = hardCheck({
+    tier,
+    capability,
+    args,
+    policy,
+    features,
+    account,
+    'protectedIds': deps.protectedIds,
+    'pterodactyl': guild.pterodactyl,
+  });
   if (hard.verdict === 'deny') return asDecision(hard);
   if (capability.risk === 'read') return asDecision(hard);
   // The owner's allow list means "no cards for this tool, ever": it short-circuits the model layers too.

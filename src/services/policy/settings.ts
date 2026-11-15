@@ -250,6 +250,54 @@ export const SETTINGS: Setting[] = [
     'parse': oneOf(['private', 'public'] as const, 'visibility'),
   },
   {
+    'path': 'pterodactyl.enabled',
+    'scope': 'owner',
+    'description': 'use the panel in .env (PTERO_CLIENT_KEY) for server tools',
+    'parse': boolean,
+  },
+  {
+    'path': 'pterodactyl.baseUrl',
+    'scope': 'owner',
+    'description': 'scheme and host of the panel, e.g. https://panel.example.com (empty = PTERO_BASE_URL)',
+    'parse': raw => {
+      const value = raw.trim();
+      if (value.length === 0) return '';
+      try {
+        const url = new URL(value);
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('scheme');
+        return value.replace(/\/+$/, '');
+      } catch {
+        throw new Error(`"${raw}" is not an http(s) URL`);
+      }
+    },
+  },
+  {
+    'path': 'pterodactyl.admin',
+    'scope': 'owner',
+    'description': 'enable the application-API tools (needs PTERO_ADMIN_KEY): the whole panel',
+    'parse': boolean,
+  },
+  {
+    'path': 'pterodactyl.files',
+    'scope': 'owner',
+    'description': 'enable the panel file tools: read and OVERWRITE files inside a server',
+    'parse': boolean,
+  },
+  {
+    'path': 'pterodactyl.servers',
+    'scope': 'owner',
+    'description': 'comma-separated allow-list of server identifiers/ids (empty = every server the key sees)',
+    'parse': raw => {
+      const names = raw
+        .split(/[\s,]+/)
+        .map(entry => entry.trim())
+        .filter(entry => entry.length > 0 && entry.toLowerCase() !== 'none');
+      const bad = names.find(name => !/^[A-Za-z0-9-]{1,64}$/.test(name));
+      if (bad) throw new Error(`"${bad}" is not a server identifier`);
+      return names;
+    },
+  },
+  {
     'path': 'roles.admin',
     'scope': 'owner',
     'description': 'comma-separated role ids treated as admins',
@@ -401,6 +449,11 @@ export const VALUE_DOMAINS: Record<string, ValueDomain> = {
   'git.push': { 'kind': 'boolean' },
   'git.createRepos': { 'kind': 'boolean' },
   'git.visibility': { 'kind': 'choice', 'choices': ['private', 'public'] },
+  'pterodactyl.enabled': { 'kind': 'boolean' },
+  'pterodactyl.baseUrl': { 'kind': 'text', 'placeholder': 'https://panel.example.com' },
+  'pterodactyl.admin': { 'kind': 'boolean' },
+  'pterodactyl.files': { 'kind': 'boolean' },
+  'pterodactyl.servers': { 'kind': 'list', 'placeholder': 'server identifiers, comma separated' },
   'roles.admin': { 'kind': 'list', 'placeholder': 'role ids, comma separated' },
   'roles.trusted': { 'kind': 'list', 'placeholder': 'role ids, comma separated' },
   'access.blocked': { 'kind': 'list', 'placeholder': 'user ids, comma separated' },
