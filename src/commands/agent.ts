@@ -1,4 +1,4 @@
-import { guildEnabled, guildOnly, cooldown } from '@guards/index.ts';
+import { accessGuard, guildEnabled, guildOnly, cooldown } from '@guards/index.ts';
 import { services } from '@services/discord/services.ts';
 import { EPHEMERAL } from '@utils/constants.ts';
 import { log } from '@utils/logger.ts';
@@ -11,7 +11,7 @@ const logger = log('commands/agent');
 @Discord()
 export class AgentCommand {
   @Slash({ 'description': 'Ask the agent to do something (code, Discord admin, research)', 'name': 'ask' })
-  @Guard(guildOnly, guildEnabled, cooldown(3, 'channel'))
+  @Guard(accessGuard, guildOnly, guildEnabled, cooldown(3, 'channel'))
   async ask(
     @SlashOption({
       'description': 'what you want done',
@@ -38,7 +38,7 @@ export class AgentCommand {
   }
 
   @Slash({ 'description': 'Start a fresh conversation in this channel', 'name': 'new' })
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async fresh(interaction: ChatInputCommandInteraction) {
     const { runtime } = services.get();
     if (!interaction.guildId || !interaction.guild) return;
@@ -54,7 +54,7 @@ export class AgentCommand {
   }
 
   @Slash({ 'description': 'Stop the agent in this channel', 'name': 'abort' })
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async abort(interaction: ChatInputCommandInteraction) {
     const { runtime } = services.get();
     const stopped = await runtime.abort(`${interaction.guildId}:${interaction.channelId}`);

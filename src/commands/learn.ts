@@ -1,4 +1,4 @@
-import { guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
+import { accessGuard, guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
 import { artifacts, feedback } from '@services/database/sqlite.ts';
 import { requestApproval } from '@services/discord/approvals.ts';
 import { services } from '@services/discord/services.ts';
@@ -19,7 +19,7 @@ const logger = log('commands/learn');
 export class LearnCommand {
   /** Compiles stored lessons into a SKILL.md candidate and asks an admin to approve the write. */
   @Slash({ 'name': 'learn', 'description': "Turn this server's lessons into a skill proposal to review" })
-  @Guard(guildOnly, guildEnabled, managerOnly)
+  @Guard(accessGuard, guildOnly, guildEnabled, managerOnly)
   async learn(interaction: ChatInputCommandInteraction) {
     const guildId = interaction.guildId ?? '';
     const proposal = buildSkillProposal(guildId);
@@ -76,7 +76,7 @@ export class LearnCommand {
   }
 
   @Slash({ 'name': 'skills', 'description': 'List learned skills and feedback, or revert a skill version' })
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async skills(
     @SlashOption({
       'name': 'revert',

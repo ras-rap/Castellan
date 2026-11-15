@@ -1,4 +1,4 @@
-import { guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
+import { accessGuard, guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
 import { effectiveModel, modelAllowlist, modelRef } from '@services/agent/models.ts';
 import { providerSummary } from '@services/agent/providers.ts';
 import { config } from '@services/config.ts';
@@ -63,7 +63,7 @@ async function stopGuildServer(guildId: string, interaction: ChatInputCommandInt
 export class ModelCommand {
   @Slash({ 'name': 'current', 'description': 'Which models this server uses' })
   @SlashGroup('model')
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async current(interaction: ChatInputCommandInteraction) {
     const guildId = interaction.guildId ?? '';
     const primary = effectiveModel('primary', guildId);
@@ -104,7 +104,7 @@ export class ModelCommand {
 
   @Slash({ 'name': 'list', 'description': 'Models the agent server can run here' })
   @SlashGroup('model')
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async list(
     @SlashOption({
       'name': 'filter',
@@ -153,7 +153,7 @@ export class ModelCommand {
 
   @Slash({ 'name': 'set', 'description': 'Switch this server to another model (admin)' })
   @SlashGroup('model')
-  @Guard(guildOnly, guildEnabled, managerOnly)
+  @Guard(accessGuard, guildOnly, guildEnabled, managerOnly)
   async set(
     @SlashOption({
       'name': 'model',
@@ -203,7 +203,7 @@ export class ModelCommand {
 
   @Slash({ 'name': 'reset', 'description': "Drop this server's model override (admin)" })
   @SlashGroup('model')
-  @Guard(guildOnly, guildEnabled, managerOnly)
+  @Guard(accessGuard, guildOnly, guildEnabled, managerOnly)
   async reset(
     @SlashChoice({ 'name': 'both', 'value': 'both' })
     @SlashChoice({ 'name': 'primary', 'value': 'primary' })

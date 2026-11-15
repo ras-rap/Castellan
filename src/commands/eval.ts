@@ -1,4 +1,4 @@
-import { guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
+import { accessGuard, guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
 import { services } from '@services/discord/services.ts';
 import { evaluateCurrent } from '@services/evolution/compare.ts';
 import { summarise } from '@services/evolution/evals.ts';
@@ -12,7 +12,7 @@ import type { ChatInputCommandInteraction } from 'discord.js';
 export class EvalCommand {
   /** Replays `config/fixtures` against the current skill state: the "are we actually good" button. */
   @Slash({ 'name': 'eval', 'description': 'Replay the eval fixtures against the current agent' })
-  @Guard(guildOnly, guildEnabled, managerOnly)
+  @Guard(accessGuard, guildOnly, guildEnabled, managerOnly)
   async evaluate(interaction: ChatInputCommandInteraction) {
     const fixtures = loadFixtures();
     if (fixtures.length === 0) {

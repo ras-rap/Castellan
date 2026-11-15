@@ -19,6 +19,8 @@ export const RISK_NAMES = ['read', 'reversible', 'destructive', 'admin'] as cons
 export const RANK_NAMES = ['guest', 'member', 'trusted', 'admin', 'owner'] as const;
 export const VERDICTS = ['allow', 'ask', 'deny'] as const;
 export const POLICY_MODES = ['ask', 'vibe', 'locked'] as const;
+/** How eagerly the agent asks instead of acting on its own reading of a request. */
+export const CLARIFY_LEVELS = ['off', 'normal', 'high', 'always'] as const;
 
 const Verdict = z.enum(VERDICTS);
 const RankName = z.enum(RANK_NAMES);
@@ -62,6 +64,86 @@ const PolicySchema = z
         'askOnUncertain': z.boolean().default(true),
       })
       .default({}),
+    /**
+     * Layer 3: the guild's own primary agent reviews the call it is about to make. off = never ask it,
+     * shadow = record what it would have said, enforce = it can tighten (never loosen) the verdict.
+     */
+    'review': z
+      .object({
+        'mode': z.enum(['off', 'shadow', 'enforce']).default('enforce'),
+        /** A reviewer "allow" below this confidence is downgraded to "ask". */
+        'minConfidence': z.number().min(0).max(1).default(0.5),
+        /** Which role answers the review: the main agent (`primary`) or the cheap one (`fast`). */
+        'model': z.enum(['primary', 'fast']).default('primary'),
+      })
+      .default({}),
+  })
+  .default({});
+
+/**
+ * Per-account permissions. `access.blocked` means the bot ignores the account everywhere (turns, commands,
+ * approvals); a profile can only tighten what the guild already allows, except `rank`, which pins a tier
+ * without a Discord role. Owner-authored, because pinning a rank grants capability.
+ */
+const UserAccessSchema = z
+  .object({
+    /** Pins the rank for this account instead of deriving it from roles. */
+    'rank': z.enum(RANK_NAMES).optional(),
+    /** Highest risk class this account may reach; `read` is "may look, may not change". */
+    'risk': z.enum(RISK_NAMES).optional(),
+    /** `allow` is a whitelist (empty = inherit), `deny` always wins. */
+    'tools': z
+      .object({ 'allow': z.array(z.string()).default([]), 'deny': z.array(z.string()).default([]) })
+      .default({}),
+    /** Slash commands this account may run; same rule as tools. */
+    'commands': z
+      .object({ 'allow': z.array(z.string()).default([]), 'deny': z.array(z.string()).default([]) })
+      .default({}),
+  })
+  .default({});
+
+const AccessSchema = z
+  .object({
+    'blocked': z.array(z.string()).default([]),
+    'users': z.record(z.string(), UserAccessSchema).default({}),
+  })
+  .default({});
+
+/**
+ * Per-guild feature switches. Everything here is resolved at provisioning time: `tools.disabled` decides what
+ * the model is even offered, `clarify` what the persona tells it to do. Narrowing only — no flag here grants a
+ * capability, so a guild admin may own them.
+ */
+const FeatureSchema = z
+  .object({
+    'tools': z
+      .object({
+        /** Tool names and/or set names (`discord`, `channels`, `shell`, …); see `TOOL_SETS`. */
+        'disabled': z.array(z.string()).default([]),
+      })
+      .default({}),
+    /** off = act on the obvious reading; always = never act on an interpretation, ask first. */
+    'clarify': z.enum(CLARIFY_LEVELS).default('normal'),
+  })
+  .default({});
+
+/**
+ * Optional hosted git server. Credentials never live here: the token comes from `.env` (`GIT_TOKEN`), this only
+ * says whether the guild may use it and what it may do with it.
+ */
+const GitSchema = z
+  .object({
+    'enabled': z.boolean().default(false),
+    'provider': z.enum(['gitea', 'forgejo', 'gitlab']).default('forgejo'),
+    /** Scheme + host, e.g. `https://git.example.com`; empty falls back to `GIT_BASE_URL`. */
+    'baseUrl': z.string().default(''),
+    /** Group/user that owns repos this bot creates; empty falls back to `GIT_OWNER`. */
+    'owner': z.string().default(''),
+    /** Push after every commit (each turn, each artifact write). */
+    'push': z.boolean().default(false),
+    /** Let the agent create repositories on the server. */
+    'createRepos': z.boolean().default(false),
+    'visibility': z.enum(['private', 'public']).default('private'),
   })
   .default({});
 
@@ -80,9 +162,16 @@ const GuildConfigSchema = z.object({
   /** `/model set` writes here; unset roles fall back to the deployment defaults in MODELS. */
   'model': z.object({ 'primary': z.string().min(3).optional(), 'fast': z.string().min(3).optional() }).default({}),
   'policy': PolicySchema,
+  'features': FeatureSchema,
+  'access': AccessSchema,
+  'git': GitSchema,
 });
 
 export type GuildPolicy = z.infer<typeof PolicySchema>;
+export type GuildFeatures = z.infer<typeof FeatureSchema>;
+export type UserAccess = z.infer<typeof UserAccessSchema>;
+export type GuildAccess = z.infer<typeof AccessSchema>;
+export type GuildGit = z.infer<typeof GitSchema>;
 
 /** Every default in one object, so `/config reset` restores exactly what the schema says. */
 export const guildDefaults = (): GuildSettings => GuildConfigSchema.parse({});
@@ -142,6 +231,12 @@ export const config = {
   'shellDefaults': { 'mode': 'docker' as const, 'image': 'debian:bookworm-slim', 'fallback': 'error' as const },
   /** Effective policy for a guild: schema defaults when the guild has never been touched. */
   'policy': (id: string): GuildPolicy => GuildConfigSchema.parse(readGuilds()[id] ?? {}).policy,
+  /** Effective feature switches, resolved the same way so a missing key is never a crash. */
+  'features': (id: string): GuildFeatures => GuildConfigSchema.parse(readGuilds()[id] ?? {}).features,
+  /** Per-account permissions for a guild, defaults included. */
+  'access': (id: string): GuildAccess => GuildConfigSchema.parse(readGuilds()[id] ?? {}).access,
+  /** Git server switches (credentials come from `.env`, never from this file). */
+  'git': (id: string): GuildGit => GuildConfigSchema.parse(readGuilds()[id] ?? {}).git,
   paths,
   'raw': () => readGuilds(),
   'guild': (id: string): GuildSettings | undefined => readGuilds()[id],

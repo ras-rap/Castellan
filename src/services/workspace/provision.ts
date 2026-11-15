@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { paths } from '@services/config.ts';
 import { workspaces } from '@services/database/sqlite.ts';
-import { commitWorkspace } from '@services/evolution/skills.ts';
+import { commitWorkspace } from '@services/git/workspace.ts';
 import { log } from '@utils/logger.ts';
 
 import { renderAgentsFile, renderDiscordToolFile, renderWorkspaceConfig } from './codegen.ts';
@@ -32,8 +32,9 @@ export function provisionWorkspace(guildId: string, guildName: string): Provisio
 
   const changed: string[] = [];
   if (writeIfChanged(resolve(dir, 'opencode.json'), renderWorkspaceConfig(guildId))) changed.push('opencode.json');
-  if (writeIfChanged(resolve(dir, 'AGENTS.md'), renderAgentsFile(guildName))) changed.push('AGENTS.md');
-  if (writeIfChanged(resolve(dir, '.opencode/tools/discord.ts'), renderDiscordToolFile())) changed.push('discord.ts');
+  if (writeIfChanged(resolve(dir, 'AGENTS.md'), renderAgentsFile(guildName, guildId))) changed.push('AGENTS.md');
+  if (writeIfChanged(resolve(dir, '.opencode/tools/discord.ts'), renderDiscordToolFile(guildId)))
+    changed.push('discord.ts');
   // Code under repo/ must be tracked: edits there are click-free precisely because every turn is committed and
   // /undo can revert them. Only build artefacts and caches are ignored.
   const gitignore = ['repo/node_modules/', 'repo/dist/', 'repo/build/', 'repo/.venv/', 'repo/venv/', '*.log', ''].join(
@@ -51,7 +52,8 @@ export function provisionWorkspace(guildId: string, guildName: string): Provisio
   });
 
   // The scaffold gets committed once, which gives /undo a floor it can never reset past.
-  if (commitWorkspace(guildId, 'agent: workspace init')) logger.debug('initial workspace commit created', { guildId });
+  if (commitWorkspace(guildId, 'agent: workspace init').committed)
+    logger.debug('initial workspace commit created', { guildId });
 
   logger.info('workspace provisioned', { guildId, dir, 'regenerated': changed });
   return { dir, bridgeToken };

@@ -1,5 +1,5 @@
 import { resolveApproval } from '@services/discord/approvals.ts';
-import { tierOf } from '@services/policy/gate.ts';
+import { tierOf } from '@services/policy/hard.ts';
 import { EPHEMERAL } from '@utils/constants.ts';
 import { log } from '@utils/logger.ts';
 import { ButtonComponent, Discord } from 'discordx';

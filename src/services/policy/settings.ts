@@ -1,6 +1,15 @@
 import { modelRef } from '@services/agent/models.ts';
-import { capabilities } from '@services/bridge/capabilities.ts';
-import { RISK_NAMES, RANK_NAMES, POLICY_MODES, VERDICTS, guildDefaults, type GuildSettings } from '@services/config.ts';
+import { TOOL_SETS, capabilityNames, toolSetNames } from '@services/bridge/capabilities.ts';
+import {
+  CLARIFY_LEVELS,
+  RISK_NAMES,
+  RANK_NAMES,
+  POLICY_MODES,
+  VERDICTS,
+  guildDefaults,
+  isOwner,
+  type GuildSettings,
+} from '@services/config.ts';
 
 /**
  * Who may change a setting. `admin` means a guild admin (tier 3, or the bot owner); `owner` means the bot
@@ -17,7 +26,7 @@ export type Setting = {
   parse: (raw: string) => unknown;
 };
 
-const TOOL_NAMES = capabilities.map(capability => capability.name);
+const TOOL_NAMES = capabilityNames;
 
 const nonEmpty = (value: string, what: string): string => {
   const trimmed = value.trim();
@@ -49,6 +58,18 @@ const toolNames = (raw: string): string[] => {
     .filter(name => name.length > 0);
   const unknown = names.find(name => !TOOL_NAMES.includes(name));
   if (unknown) throw new Error(`"${unknown}" is not one of the ${TOOL_NAMES.length} tools`);
+  return names;
+};
+
+/** `features.tools.disabled` accepts one tool, one set, or a mix — "discord" is the whole Discord surface. */
+const toolOrSets = (raw: string): string[] => {
+  const names = raw
+    .split(/[\s,]+/)
+    .map(name => name.trim())
+    .filter(name => name.length > 0);
+  const known = toolSetNames();
+  const unknown = names.find(name => !known.includes(name));
+  if (unknown) throw new Error(`"${unknown}" is not a tool; sets are ${TOOL_SETS.join(', ')}`);
   return names;
 };
 
@@ -112,6 +133,28 @@ export const SETTINGS: Setting[] = [
     'parse': boolean,
   },
   {
+    'path': 'policy.review.mode',
+    'scope': 'admin',
+    'description': "the agent's own review of each call: off, shadow (log only) or enforce (can block)",
+    'parse': oneOf(['off', 'shadow', 'enforce'] as const, 'review mode'),
+  },
+  {
+    'path': 'policy.review.minConfidence',
+    'scope': 'admin',
+    'description': 'how sure the review must be to let a call run without a human (0-1)',
+    'parse': raw => {
+      const value = Number(raw.trim());
+      if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error('minConfidence must be a number 0-1');
+      return value;
+    },
+  },
+  {
+    'path': 'policy.review.model',
+    'scope': 'admin',
+    'description': 'which model answers the review: primary (the agent itself) or fast',
+    'parse': oneOf(['primary', 'fast'] as const, 'review model'),
+  },
+  {
     'path': 'policy.tools.deny',
     'scope': 'admin',
     'description': 'comma-separated tools nobody may run here',
@@ -122,6 +165,18 @@ export const SETTINGS: Setting[] = [
     'scope': 'owner',
     'description': 'comma-separated tools that skip the approval card for everyone',
     'parse': toolNames,
+  },
+  {
+    'path': 'features.tools.disabled',
+    'scope': 'admin',
+    'description': 'tools or whole sets switched off here — not even offered to the model',
+    'parse': toolOrSets,
+  },
+  {
+    'path': 'features.clarify',
+    'scope': 'admin',
+    'description': 'how eagerly the agent asks before acting: off, normal, high, always',
+    'parse': oneOf(CLARIFY_LEVELS, 'clarify'),
   },
   ...matrixSettings,
   {
@@ -143,6 +198,58 @@ export const SETTINGS: Setting[] = [
     'parse': oneOf(['error', 'host'] as const, 'fallback'),
   },
   {
+    'path': 'git.enabled',
+    'scope': 'owner',
+    'description': 'use the git server in .env (GIT_TOKEN) for pushes and repository creation',
+    'parse': boolean,
+  },
+  {
+    'path': 'git.provider',
+    'scope': 'owner',
+    'description': 'which API the server speaks: gitea, forgejo or gitlab',
+    'parse': oneOf(['gitea', 'forgejo', 'gitlab'] as const, 'provider'),
+  },
+  {
+    'path': 'git.baseUrl',
+    'scope': 'owner',
+    'description': 'scheme and host of the git server, e.g. https://git.example.com (empty = GIT_BASE_URL)',
+    'parse': raw => {
+      const value = raw.trim();
+      if (value.length === 0) return '';
+      try {
+        const url = new URL(value);
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('scheme');
+        return value.replace(/\/+$/, '');
+      } catch {
+        throw new Error(`"${raw}" is not an http(s) URL`);
+      }
+    },
+  },
+  {
+    'path': 'git.owner',
+    'scope': 'owner',
+    'description': 'group/user that owns repos this bot creates (empty = GIT_OWNER)',
+    'parse': raw => raw.trim(),
+  },
+  {
+    'path': 'git.push',
+    'scope': 'owner',
+    'description': 'push after every commit: each turn and each artifact write',
+    'parse': boolean,
+  },
+  {
+    'path': 'git.createRepos',
+    'scope': 'owner',
+    'description': 'let the agent create repositories on the git server',
+    'parse': boolean,
+  },
+  {
+    'path': 'git.visibility',
+    'scope': 'owner',
+    'description': 'visibility of repositories the agent creates: private or public',
+    'parse': oneOf(['private', 'public'] as const, 'visibility'),
+  },
+  {
     'path': 'roles.admin',
     'scope': 'owner',
     'description': 'comma-separated role ids treated as admins',
@@ -152,6 +259,12 @@ export const SETTINGS: Setting[] = [
     'path': 'roles.trusted',
     'scope': 'owner',
     'description': 'comma-separated role ids treated as trusted',
+    'parse': snowflakes,
+  },
+  {
+    'path': 'access.blocked',
+    'scope': 'owner',
+    'description': 'comma-separated user ids that may not use the bot here at all',
     'parse': snowflakes,
   },
   {
@@ -245,4 +358,73 @@ export function describeSetting(settings: GuildSettings, path: string): string {
   if (Array.isArray(value)) return value.length === 0 ? 'empty' : value.join(', ');
   if (typeof value === 'object' && value !== null) return JSON.stringify(value);
   return String(value);
+}
+
+/** Who may write a setting: admins for the narrowing keys, the bot owner for everything that grants. */
+export const writableBy = (setting: Setting, userId: string): boolean => setting.scope === 'admin' || isOwner(userId);
+
+/**
+ * How a value is chosen, which is what makes the `/settings` panel possible: booleans become two buttons, known
+ * value sets become a select menu, everything else a modal. `parse` stays the only validator — the panel never
+ * invents a value the slash command would refuse, and a test asserts every listed choice parses.
+ */
+export type ValueDomain = {
+  kind: 'boolean' | 'choice' | 'text' | 'list' | 'number';
+  choices?: readonly string[];
+  /** Shown in the modal for free-text entry: what the value should look like. */
+  placeholder?: string;
+};
+
+const MATRIX_DOMAIN: ValueDomain = { 'kind': 'choice', 'choices': VERDICTS };
+
+export const VALUE_DOMAINS: Record<string, ValueDomain> = {
+  'enabled': { 'kind': 'boolean' },
+  'policy.mode': { 'kind': 'choice', 'choices': POLICY_MODES },
+  'policy.vibe.maxRisk': { 'kind': 'choice', 'choices': ['read', 'reversible', 'destructive'] },
+  'policy.vibe.screen': { 'kind': 'choice', 'choices': ['off', 'shadow', 'enforce'] },
+  'policy.vibe.minApproval': { 'kind': 'number', 'placeholder': '0 - 1, e.g. 0.4' },
+  'policy.vibe.askOnUncertain': { 'kind': 'boolean' },
+  'policy.review.mode': { 'kind': 'choice', 'choices': ['off', 'shadow', 'enforce'] },
+  'policy.review.minConfidence': { 'kind': 'number', 'placeholder': '0 - 1, e.g. 0.5' },
+  'policy.review.model': { 'kind': 'choice', 'choices': ['primary', 'fast'] },
+  'policy.tools.deny': { 'kind': 'list', 'placeholder': 'tool names, comma separated' },
+  'policy.tools.allow': { 'kind': 'list', 'placeholder': 'tool names, comma separated' },
+  'features.tools.disabled': { 'kind': 'list', 'placeholder': 'tools or sets, e.g. channels, shell, git' },
+  'features.clarify': { 'kind': 'choice', 'choices': CLARIFY_LEVELS },
+  'shell.mode': { 'kind': 'choice', 'choices': ['docker', 'host'] },
+  'shell.image': { 'kind': 'text', 'placeholder': 'debian:bookworm-slim' },
+  'shell.fallback': { 'kind': 'choice', 'choices': ['error', 'host'] },
+  'git.enabled': { 'kind': 'boolean' },
+  'git.provider': { 'kind': 'choice', 'choices': ['forgejo', 'gitea', 'gitlab'] },
+  'git.baseUrl': { 'kind': 'text', 'placeholder': 'https://git.example.com' },
+  'git.owner': { 'kind': 'text', 'placeholder': 'group or user that owns new repos' },
+  'git.push': { 'kind': 'boolean' },
+  'git.createRepos': { 'kind': 'boolean' },
+  'git.visibility': { 'kind': 'choice', 'choices': ['private', 'public'] },
+  'roles.admin': { 'kind': 'list', 'placeholder': 'role ids, comma separated' },
+  'roles.trusted': { 'kind': 'list', 'placeholder': 'role ids, comma separated' },
+  'access.blocked': { 'kind': 'list', 'placeholder': 'user ids, comma separated' },
+  'model.primary': { 'kind': 'text', 'placeholder': 'provider/model' },
+  'model.fast': { 'kind': 'text', 'placeholder': 'provider/model' },
+  ...Object.fromEntries(
+    RANK_NAMES.flatMap(rank => RISK_NAMES.map(risk => [`policy.matrix.${rank}.${risk}`, MATRIX_DOMAIN])),
+  ),
+};
+
+export const domainOf = (path: string): ValueDomain | undefined => VALUE_DOMAINS[path];
+
+/** The first segment of a path is its panel category (`policy`, `features`, `git`, …). */
+export const categoryOf = (path: string): string => path.split('.')[0] ?? path;
+
+/** Settings a person may change, grouped by category, in registry order. */
+export function settingsByCategory(userId: string): Map<string, Setting[]> {
+  const grouped = new Map<string, Setting[]>();
+  for (const setting of SETTINGS) {
+    if (!writableBy(setting, userId)) continue;
+    const category = categoryOf(setting.path);
+    const bucket = grouped.get(category) ?? [];
+    bucket.push(setting);
+    grouped.set(category, bucket);
+  }
+  return grouped;
 }

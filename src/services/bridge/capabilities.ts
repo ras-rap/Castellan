@@ -1,3 +1,6 @@
+import { config } from '@services/config.ts';
+import { createRepo } from '@services/git/forge.ts';
+import { attachOrigin, commitNow, describeWorkspace, pushWorkspace } from '@services/git/workspace.ts';
 import { runShell } from '@services/workspace/shell.ts';
 import {
   ChannelType,
@@ -737,6 +740,131 @@ export const capabilities: Capability[] = [
       return `banned ${name} (${member.id}) deletedMessages=${seconds}s`;
     },
   },
+  {
+    'name': 'git_status',
+    'summary': 'Workspace git state',
+    'description':
+      "This server's workspace repository: branch, remote, uncommitted files, unpushed commits and the last few commits.",
+    'risk': 'read',
+    'params': [],
+    'run': async ctx => describeWorkspace(ctx.guild.id),
+  },
+  {
+    'name': 'git_commit',
+    'summary': 'Commit workspace changes',
+    'description':
+      'Commit everything in the workspace with your own message. Each turn is committed automatically; use this for an explicit checkpoint, and it is pushed when auto-push is on.',
+    'risk': 'reversible',
+    'params': [{ 'name': 'message', 'kind': 'string', 'description': 'commit message', 'required': true }],
+    'run': async (ctx, args) =>
+      commitNow({ 'guildId': ctx.guild.id, 'message': requireStr(args, 'message').slice(0, 200) }),
+  },
+  {
+    'name': 'git_push',
+    'summary': 'Push the workspace',
+    'description':
+      'Push the current branch to the git server configured for this server. Refuses when no server is configured.',
+    'risk': 'reversible',
+    'params': [],
+    'run': async ctx => {
+      const pushed = pushWorkspace(ctx.guild.id);
+      if (!pushed.ok) throw new Error(pushed.detail);
+      return pushed.detail;
+    },
+  },
+  {
+    'name': 'git_repo_create',
+    'summary': 'Create a repository on the git server',
+    'description':
+      'Create a new repository for this server on the configured git server, optionally pointing the workspace at it as origin.',
+    'risk': 'reversible',
+    'params': [
+      { 'name': 'name', 'kind': 'string', 'description': 'repository name (letters, digits, . _ -)', 'required': true },
+      {
+        'name': 'attach',
+        'kind': 'boolean',
+        'description': 'set it as the workspace origin, only when the workspace has none',
+      },
+    ],
+    'run': async (ctx, args) => {
+      if (!config.git(ctx.guild.id).createRepos)
+        throw new Error('creating repositories is off here (git.createRepos is false)');
+      const name = requireStr(args, 'name');
+      if (!/^[\w.-]{1,64}$/.test(name)) throw new Error(`"${name}" is not a usable repository name`);
+      const repo = await createRepo(ctx.guild.id, name);
+      if (!repo) throw new Error('the git server refused the create request (see the bot log)');
+      const attached = args.attach === true ? attachOrigin(ctx.guild.id, repo.cloneUrl) : undefined;
+      return [
+        `created ${repo.name}: ${repo.htmlUrl}`,
+        attached ? `origin: ${attached.ok ? repo.cloneUrl : `not attached — ${attached.detail}`}` : 'origin unchanged',
+      ].join('\n');
+    },
+  },
 ];
 
 export const capabilityNames = capabilities.map(capability => capability.name);
+
+/**
+ * Coarse sets a guild can switch off in one go (`features.tools.disabled`). `discord` is every capability
+ * that talks to Discord; the rest are the areas inside it, plus `shell` for the sandboxed `bash` tool.
+ */
+export const TOOL_SETS = [
+  'discord',
+  'server',
+  'channels',
+  'messages',
+  'threads',
+  'members',
+  'roles',
+  'permissions',
+  'invites',
+  'shell',
+  'git',
+] as const;
+export type ToolSet = (typeof TOOL_SETS)[number];
+
+/**
+ * Which sets each tool belongs to. Kept as one table so the taxonomy is readable in one place; `TOOL_SETS`
+ * coverage is enforced by a test, so a new capability cannot ship without deciding its sets.
+ */
+const SETS: Record<string, ToolSet[]> = {
+  'guild_info': ['discord', 'server'],
+  'channels_list': ['discord', 'channels'],
+  'channel_info': ['discord', 'channels'],
+  'channel_create': ['discord', 'channels'],
+  'channel_update': ['discord', 'channels'],
+  'channel_move': ['discord', 'channels'],
+  'channel_delete': ['discord', 'channels'],
+  'roles_list': ['discord', 'roles'],
+  'role_assign': ['discord', 'roles'],
+  'role_create': ['discord', 'roles'],
+  'role_update': ['discord', 'roles'],
+  'role_delete': ['discord', 'roles'],
+  'member_list': ['discord', 'members'],
+  'member_info': ['discord', 'members'],
+  'member_timeout': ['discord', 'members'],
+  'member_kick': ['discord', 'members'],
+  'member_ban': ['discord', 'members'],
+  'messages_fetch': ['discord', 'messages'],
+  'message_send': ['discord', 'messages'],
+  'message_delete': ['discord', 'messages'],
+  'message_pin': ['discord', 'messages'],
+  'thread_create': ['discord', 'threads'],
+  'thread_update': ['discord', 'threads'],
+  'permission_set': ['discord', 'permissions'],
+  'invite_create': ['discord', 'invites'],
+  'bash': ['shell'],
+  'git_status': ['git'],
+  'git_commit': ['git'],
+  'git_push': ['git'],
+  'git_repo_create': ['git'],
+};
+
+export const setsOf = (name: string): ToolSet[] => SETS[name] ?? [];
+
+/** Names a guild may put in `features.tools.disabled`: one tool, or one set that covers several. */
+export const toolSetNames = (): string[] => [...capabilityNames, ...TOOL_SETS];
+
+/** Disabled by name, or by any set it belongs to. Naming a set is the "all channel tools" switch. */
+export const toolDisabled = (name: string, disabled: readonly string[]): boolean =>
+  disabled.includes(name) || setsOf(name).some(set => disabled.includes(set));

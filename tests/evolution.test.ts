@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 
 import { paths } from '@services/config.ts';
 import { buildSkillProposal, renderProposal } from '@services/evolution/proposals.ts';
-import { commitWorkspace, readSkill, writeSkill } from '@services/evolution/skills.ts';
+import { readSkill, writeSkill } from '@services/evolution/skills.ts';
+import { commitWorkspace } from '@services/git/workspace.ts';
 import { Memory } from '@services/memory/store.ts';
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';

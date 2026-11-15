@@ -1,4 +1,4 @@
-import { guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
+import { accessGuard, guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
 import { undoWorkspace, readSkill, revertSkill } from '@services/evolution/skills.ts';
 import { EPHEMERAL } from '@utils/constants.ts';
 import { Discord, Guard, Slash, SlashOption } from 'discordx';
@@ -9,7 +9,7 @@ import type { ApplicationCommandOptionType as OptionType, ChatInputCommandIntera
 export class UndoCommand {
   /** Code edits inside `repo/` need no approval because every turn is committed — this is the escape hatch. */
   @Slash({ 'name': 'undo', 'description': "Revert the last turn's file changes in this server's workspace" })
-  @Guard(guildOnly, guildEnabled, managerOnly)
+  @Guard(accessGuard, guildOnly, guildEnabled, managerOnly)
   async undo(interaction: ChatInputCommandInteraction) {
     const result = undoWorkspace(interaction.guildId ?? '');
     await interaction.reply({
@@ -20,7 +20,7 @@ export class UndoCommand {
 
   /** Kept tiny on purpose: the heavy listing lives in /skills; this shows the current skill file only. */
   @Slash({ 'name': 'skill-file', 'description': 'Show the learned skill file and its versions' })
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async skillFile(
     @SlashOption({ 'name': 'name', 'description': 'skill name', 'required': false, 'type': 3 as OptionType.String })
     name: string | undefined,

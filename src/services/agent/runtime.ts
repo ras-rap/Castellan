@@ -6,10 +6,11 @@ import {
   requestAnswers,
 } from '@services/discord/questions.ts';
 import { StreamRenderer } from '@services/discord/render.ts';
-import { commitWorkspace } from '@services/evolution/skills.ts';
+import { commitWorkspace } from '@services/git/workspace.ts';
 import { memoryContext, writeDigest } from '@services/memory/inject.ts';
 import { reflectTurn, worthReflecting } from '@services/memory/reflect.ts';
-import { screenPermission, tierOf } from '@services/policy/gate.ts';
+import { screenPermission } from '@services/policy/gate.ts';
+import { tierOf } from '@services/policy/hard.ts';
 import { optionalEnv } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 

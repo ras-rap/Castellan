@@ -1,7 +1,8 @@
 import { modelRef } from '@services/agent/models.ts';
 import { capabilityByName } from '@services/bridge/lookup.ts';
 import { chunkMessage } from '@services/discord/render.ts';
-import { decide, tierOf } from '@services/policy/gate.ts';
+import { decide } from '@services/policy/gate.ts';
+import { tierOf } from '@services/policy/hard.ts';
 import { describe, expect, test } from 'bun:test';
 
 import type { GuildMember } from 'discord.js';

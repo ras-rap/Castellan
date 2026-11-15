@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 
 import { paths } from '@services/config.ts';
 import { feedback, artifacts } from '@services/database/sqlite.ts';
+import { commitWorkspace } from '@services/git/workspace.ts';
 import { log } from '@utils/logger.ts';
 
 const logger = log('evolution');
@@ -24,52 +25,6 @@ export function skillFile(guildId: string, name: string): string {
 export function readSkill(guildId: string, name: string): string | undefined {
   const file = skillFile(guildId, name);
   return existsSync(file) ? readFileSync(file, 'utf8') : undefined;
-}
-
-/**
- * Every artifact change is committed to the workspace git repo first, so a bad self-edit is one `git revert`
- * away and the diff of what the agent taught itself stays inspectable.
- */
-export function commitWorkspace(guildId: string, message: string): boolean {
-  const cwd = resolve(paths.workspaces, guildId);
-  mkdirSync(cwd, { 'recursive': true });
-  // Bun.spawnSync does not always resolve bare names from PATH on Windows, so the binary is located first.
-  const git = Bun.which('git');
-  if (!git) {
-    logger.warn('git not found; artifact changes will not be versioned', { guildId });
-    return false;
-  }
-  const run = (argv: string[]) =>
-    Bun.spawnSync([git, ...argv], { 'cwd': cwd, 'stdout': 'pipe', 'stderr': 'pipe', 'env': Bun.env });
-
-  if (!existsSync(resolve(cwd, '.git'))) {
-    const init = run(['init', '-q']);
-    if (init.exitCode !== 0) {
-      logger.warn('git init failed; skills will not be versioned', {
-        guildId,
-        'stderr': init.stderr.toString().slice(0, 200),
-      });
-      return false;
-    }
-  }
-  run(['add', '-A']);
-  const commit = run([
-    '-c',
-    'user.email=agent@open-discord-agent',
-    '-c',
-    'user.name=open-discord-agent',
-    'commit',
-    '-q',
-    '-m',
-    message,
-  ]);
-  if (commit.exitCode !== 0) {
-    const stderr = commit.stderr.toString();
-    if (!stderr.includes('nothing to commit'))
-      logger.warn('workspace commit failed', { guildId, 'stderr': stderr.slice(0, 200) });
-    return false;
-  }
-  return true;
 }
 
 export function writeSkill(

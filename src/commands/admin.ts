@@ -1,4 +1,4 @@
-import { guildEnabled, guildOnly, ownerOnly } from '@guards/index.ts';
+import { accessGuard, guildEnabled, guildOnly, ownerOnly } from '@guards/index.ts';
 import { effectiveModel, models } from '@services/agent/models.ts';
 import { readyProviderIds } from '@services/agent/providers.ts';
 import { config } from '@services/config.ts';
@@ -17,7 +17,7 @@ const logger = log('commands/admin');
 @Discord()
 export class AdminCommand {
   @Slash({ 'description': 'Bot, server, sandbox, and policy status', 'name': 'status' })
-  @Guard(guildOnly)
+  @Guard(accessGuard, guildOnly)
   async status(interaction: ChatInputCommandInteraction) {
     const { supervisor, runtime } = services.get();
     const shell = await shellStatus();
@@ -74,7 +74,7 @@ export class AdminCommand {
   }
 
   @Slash({ 'description': 'Owner only: enable this server for the agent', 'name': 'enable' })
-  @Guard(guildOnly, ownerOnly)
+  @Guard(accessGuard, guildOnly, ownerOnly)
   async enable(interaction: ChatInputCommandInteraction) {
     if (!interaction.guildId) return;
     config.setGuild(interaction.guildId, {
@@ -87,7 +87,7 @@ export class AdminCommand {
   }
 
   @Slash({ 'description': 'Last tool decisions in this server', 'name': 'audit' })
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async auditLog(interaction: ChatInputCommandInteraction) {
     const rows = audit.recent(interaction.guildId ?? '', 10);
     const text = rows
@@ -100,7 +100,7 @@ export class AdminCommand {
   }
 
   @Slash({ 'description': 'Store a durable fact about this server', 'name': 'remember' })
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async remember(
     @SlashOption({
       'description': 'fact to remember',
@@ -127,7 +127,7 @@ export class AdminCommand {
   }
 
   @Slash({ 'description': "Search, inspect, or forget this server's memory", 'name': 'memory' })
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async memoryCommand(
     @SlashOption({
       'description': 'search text',

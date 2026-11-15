@@ -60,6 +60,11 @@ export class Opencode {
     await this.client.session.abort({ 'path': { 'id': sessionID } });
   }
 
+  /** Drops a throwaway session and everything in it (policy review asks once and then forgets). */
+  async deleteSession(sessionID: string): Promise<void> {
+    await this.client.session.delete({ 'path': { 'id': sessionID } }).catch(() => undefined);
+  }
+
   async isBusy(sessionID: string): Promise<boolean> {
     const res = await this.client.session.status();
     const status = res.data?.[sessionID];

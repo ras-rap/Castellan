@@ -114,7 +114,9 @@ export function startBridge(client: Client): BridgeServer {
       }
 
       const member = await memberOf(guild, session.actor_id);
-      const decision = await decide(guildId, member, capability, validated.data);
+      const decision = await decide(guildId, member, capability, validated.data, {
+        'protectedIds': [guild.ownerId, client.user?.id ?? ''],
+      });
       audit.write({
         guildId,
         'actorId': session.actor_id ?? 'unknown',

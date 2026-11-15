@@ -1,5 +1,6 @@
 import { config } from '@services/config.ts';
 import { services } from '@services/discord/services.ts';
+import { promptAccess } from '@services/policy/access.ts';
 import { log } from '@utils/logger.ts';
 import { Events, MessageFlags } from 'discord.js';
 import { Discord, On } from 'discordx';
@@ -25,6 +26,11 @@ export class MessageCreateEvent {
 
     if (!config.guild(message.guildId)?.enabled) {
       await message.reply('this server is not enabled yet — the owner can run `/enable`').catch(() => undefined);
+      return;
+    }
+    const access = promptAccess(message.guildId, message.author.id);
+    if (!access.allowed) {
+      await message.reply(access.reason).catch(() => undefined);
       return;
     }
     if (!(message.channel instanceof Object) || message.channel === null) return;

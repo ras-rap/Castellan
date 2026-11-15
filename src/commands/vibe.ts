@@ -1,4 +1,4 @@
-import { guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
+import { accessGuard, guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
 import { config } from '@services/config.ts';
 import { BRAND_COLOR, EPHEMERAL } from '@utils/constants.ts';
 import { log } from '@utils/logger.ts';
@@ -20,7 +20,7 @@ export class VibeCommand {
     'name': 'vibe',
     'description': 'Run tool calls without approval cards — Jev still vetoes destructive ones (admin)',
   })
-  @Guard(guildOnly, guildEnabled, managerOnly)
+  @Guard(accessGuard, guildOnly, guildEnabled, managerOnly)
   async vibe(
     @SlashChoice({ 'name': 'on — unattended, Jev vetoes', 'value': 'on' })
     @SlashChoice({ 'name': 'off — approval cards are back', 'value': 'off' })

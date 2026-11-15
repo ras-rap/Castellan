@@ -1,27 +1,16 @@
-import { guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
+import { accessGuard, guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
 import { effectiveModel } from '@services/agent/models.ts';
-import { RANK_NAMES, config, guildDefaults, isOwner, type GuildPolicy, type GuildSettings } from '@services/config.ts';
-import { ceilingFor, tierOf } from '@services/policy/gate.ts';
+import { TOOL_SETS } from '@services/bridge/capabilities.ts';
+import { RANK_NAMES, config, isOwner, type GuildPolicy } from '@services/config.ts';
+import { ceilingFor, tierOf } from '@services/policy/hard.ts';
 import { jevMode } from '@services/policy/jev.ts';
-import {
-  SETTINGS,
-  defaultFor,
-  describeSetting,
-  parseSetting,
-  setSetting,
-  type Setting,
-} from '@services/policy/settings.ts';
+import { applySetting } from '@services/policy/panel.ts';
+import { SETTINGS, writableBy } from '@services/policy/settings.ts';
 import { BRAND_COLOR, EPHEMERAL } from '@utils/constants.ts';
-import { log } from '@utils/logger.ts';
 import { ApplicationCommandOptionType, EmbedBuilder } from 'discord.js';
 import { Discord, Guard, Slash, SlashGroup, SlashOption } from 'discordx';
 
 import type { AutocompleteInteraction, ChatInputCommandInteraction, GuildMember } from 'discord.js';
-
-const logger = log('commands/config');
-
-/** `/config` writes into `config/guilds.json`; anything a guild admin may widen is owner-scoped in the registry. */
-const writableBy = (setting: Setting, userId: string): boolean => setting.scope === 'admin' || isOwner(userId);
 
 const policySummary = (policy: GuildPolicy): string => {
   const mode =
@@ -32,6 +21,8 @@ const policySummary = (policy: GuildPolicy): string => {
         : 'ask — anything the ceiling does not allow outright becomes an approval card';
   return [
     `mode: **${policy.mode}** — ${mode.slice(mode.indexOf('—') + 1).trim()}`,
+    `review: **${policy.review.mode}** — the agent re-reads each non-read call it is about to make` +
+      ` (min confidence ${policy.review.minConfidence})`,
     `tools denied: ${policy.tools.deny.length > 0 ? policy.tools.deny.join(', ') : 'none'}`,
     `tools allowed: ${policy.tools.allow.length > 0 ? policy.tools.allow.join(', ') : 'none'}`,
   ].join('\n');
@@ -66,10 +57,13 @@ async function suggestKeys(interaction: AutocompleteInteraction): Promise<void> 
 export class ConfigCommand {
   @Slash({ 'name': 'show', 'description': 'The permissions and policy in force here' })
   @SlashGroup('config')
-  @Guard(guildOnly, guildEnabled)
+  @Guard(accessGuard, guildOnly, guildEnabled)
   async show(interaction: ChatInputCommandInteraction) {
     const guildId = interaction.guildId ?? '';
     const policy = config.policy(guildId);
+    const features = config.features(guildId);
+    const access = config.access(guildId);
+    const git = config.git(guildId);
     const shell = config.guild(guildId)?.shell;
     const editable = SETTINGS.filter(setting => writableBy(setting, interaction.user.id));
     // discordx hands over the cached member payload; tierOf reads only id, roles and guild.ownerId.
@@ -89,6 +83,28 @@ export class ConfigCommand {
           'inline': false,
         },
         {
+          'name': 'features',
+          'value':
+            `tools off: **${features.tools.disabled.join(', ') || 'none'}** · clarify **${features.clarify}**\n` +
+            `switchable sets: ${TOOL_SETS.join(', ')}`,
+          'inline': false,
+        },
+        {
+          'name': 'access',
+          'value':
+            `blocked: **${access.blocked.length}** · profiles: **${Object.keys(access.users).length}**\n` +
+            '`/access show` for who, `/access set|block|unblock|clear` (bot owner)',
+          'inline': false,
+        },
+        {
+          'name': 'git',
+          'value': git.enabled
+            ? `${git.provider} at \`${git.baseUrl || '(GIT_BASE_URL)'}\` · auto-push **${git.push ? 'on' : 'off'}** · ` +
+              `create repos **${git.createRepos ? 'on' : 'off'}** (${git.visibility})`
+            : 'local repository only — every turn is committed, nothing is pushed',
+          'inline': false,
+        },
+        {
           'name': 'model',
           'value': `primary \`${effectiveModel('primary', guildId).id}\` · fast \`${effectiveModel('fast', guildId).id}\``,
           'inline': false,
@@ -105,14 +121,14 @@ export class ConfigCommand {
         },
         { 'name': 'jev', 'value': `deployment mode \`${jevMode}\``, 'inline': false },
       )
-      .setFooter({ 'text': '/config set key value · /config reset key · /vibe on|off' });
+      .setFooter({ 'text': '/settings to change these by clicking · /config set key value for scripts' });
 
     await interaction.reply({ 'embeds': [embed], 'flags': EPHEMERAL });
   }
 
   @Slash({ 'name': 'set', 'description': 'Change one setting here (scope-checked)' })
   @SlashGroup('config')
-  @Guard(guildOnly, guildEnabled, managerOnly)
+  @Guard(accessGuard, guildOnly, guildEnabled, managerOnly)
   async set(
     @SlashOption({
       'name': 'key',
@@ -132,50 +148,25 @@ export class ConfigCommand {
     interaction: ChatInputCommandInteraction,
   ) {
     const guildId = interaction.guildId ?? '';
-    const setting = SETTINGS.find(entry => entry.path === key.trim());
-    if (!setting) {
-      await interaction.reply({
-        'content': `unknown setting \`${key}\` — run \`/config show\` or start typing for the list`,
-        'flags': EPHEMERAL,
-      });
+    const applied = await applySetting({ guildId, 'userId': interaction.user.id, 'path': key.trim(), 'raw': value });
+    if (!applied.ok) {
+      await interaction.reply({ 'content': applied.error, 'flags': EPHEMERAL });
       return;
     }
-    if (!writableBy(setting, interaction.user.id)) {
-      await interaction.reply({
-        'content': `🔒 \`${setting.path}\` is bot-owner only (${setting.description}).`,
-        'flags': EPHEMERAL,
-      });
-      return;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = parseSetting(setting.path, value);
-    } catch (error) {
-      await interaction.reply({
-        'content': `⚠️ ${error instanceof Error ? error.message : String(error)}`,
-        'flags': EPHEMERAL,
-      });
-      return;
-    }
-
-    const current: GuildSettings = config.guild(guildId) ?? guildDefaults();
-    const next = setSetting(current, setting.path, parsed);
-    config.patchGuild(guildId, { ...next });
-    logger.info('config changed', { guildId, 'by': interaction.user.id, 'key': setting.path, 'value': parsed });
 
     const policy = config.policy(guildId);
     await interaction.reply({
       'content':
-        `✅ \`${setting.path}\` → \`${describeSetting(next, setting.path)}\`` +
-        (policy.mode === 'vibe' ? '\n⚠️ vibe mode is on: tool calls run without an approval card.' : ''),
+        `✅ \`${key.trim()}\` → \`${applied.value}\`` +
+        (policy.mode === 'vibe' ? '\n⚠️ vibe mode is on: tool calls run without an approval card.' : '') +
+        (applied.reloaded ? '\n↻ agent server stopped — the new tool list and persona load on the next prompt.' : ''),
       'flags': EPHEMERAL,
     });
   }
 
   @Slash({ 'name': 'reset', 'description': 'Restore one setting to its default' })
   @SlashGroup('config')
-  @Guard(guildOnly, guildEnabled, managerOnly)
+  @Guard(accessGuard, guildOnly, guildEnabled, managerOnly)
   async reset(
     @SlashOption({
       'name': 'key',
@@ -188,21 +179,16 @@ export class ConfigCommand {
     interaction: ChatInputCommandInteraction,
   ) {
     const guildId = interaction.guildId ?? '';
-    const setting = SETTINGS.find(entry => entry.path === key.trim());
-    if (!setting || !writableBy(setting, interaction.user.id)) {
-      await interaction.reply({
-        'content': setting ? `🔒 \`${setting.path}\` is bot-owner only.` : `unknown setting \`${key}\``,
-        'flags': EPHEMERAL,
-      });
-      return;
-    }
-
-    const current: GuildSettings = config.guild(guildId) ?? guildDefaults();
-    const next = setSetting(current, setting.path, defaultFor(setting.path));
-    config.patchGuild(guildId, { ...next });
-    logger.info('config reset', { guildId, 'by': interaction.user.id, 'key': setting.path });
+    const applied = await applySetting({
+      guildId,
+      'userId': interaction.user.id,
+      'path': key.trim(),
+      'raw': undefined,
+    });
     await interaction.reply({
-      'content': `♻️ \`${setting.path}\` back to default — now \`${describeSetting(next, setting.path)}\``,
+      'content': applied.ok
+        ? `♻️ \`${key.trim()}\` back to default — now \`${applied.value}\`${applied.reloaded ? '\n↻ agent server stopped — it reloads on the next prompt.' : ''}`
+        : applied.error,
       'flags': EPHEMERAL,
     });
   }

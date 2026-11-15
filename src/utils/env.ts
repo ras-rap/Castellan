@@ -30,6 +30,14 @@ export const OPENCODE_BIN = optional('OPENCODE_BIN');
 export const OPENCODE_CLI = optional('OPENCODE_CLI');
 export const OPENCODE_CONSOLE_TOKEN = optional('OPENCODE_CONSOLE_TOKEN');
 
+/**
+ * Git server credentials for the optional repository integration. Only the token and the deployment defaults
+ * live here; which guild may use them, and whether it may create repos, is in `config/guilds.json`.
+ */
+export const GIT_TOKEN = optional('GIT_TOKEN');
+export const GIT_BASE_URL = optional('GIT_BASE_URL');
+export const GIT_OWNER = optional('GIT_OWNER');
+
 export type EnvKey = 'DISCORD_TOKEN' | 'DISCORD_CLIENT_ID' | 'OWNER_ID';
 
 const values: Record<EnvKey, string> = { DISCORD_TOKEN, DISCORD_CLIENT_ID, OWNER_ID };

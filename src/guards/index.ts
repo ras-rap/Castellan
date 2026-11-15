@@ -1,5 +1,6 @@
 import { config } from '@services/config.ts';
-import { tierOf } from '@services/policy/gate.ts';
+import { commandAccess, commandCandidates } from '@services/policy/access.ts';
+import { tierOf } from '@services/policy/hard.ts';
 import { EPHEMERAL } from '@utils/constants.ts';
 import { OWNER_ID } from '@utils/env.ts';
 
@@ -92,5 +93,25 @@ export const managerOnly: GuardFunction = async (
     'content': 'This needs an admin (or the bot owner).',
     'flags': EPHEMERAL,
   });
+  return;
+};
+
+/**
+ * Per-account access (`access.blocked` / `access.users.<id>.commands`). Every command carries this, so a blocked
+ * account is refused everywhere and a profile can hand `/model` to someone without handing them `/config set`.
+ */
+export const accessGuard: GuardFunction = async (
+  interaction: ChatInputCommandInteraction,
+  _client: Client,
+  next: Next,
+) => {
+  const subcommand = interaction.isChatInputCommand() ? (interaction.options.getSubcommand(false) ?? null) : null;
+  const check = commandAccess(
+    interaction.guildId ?? '',
+    interaction.user.id,
+    commandCandidates(interaction.commandName, subcommand),
+  );
+  if (check.allowed) return next();
+  await interaction.reply({ 'content': check.reason, 'flags': EPHEMERAL });
   return;
 };

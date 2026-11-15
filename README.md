@@ -170,7 +170,9 @@ Path aliases (`@services/*`, `@utils/*`, `@guards/*`, `@cli/*`, `@/*`) come from
 | `/model list [filter]` | every model this server can run |
 | `/model set model:<id> [role]` · `/model reset [role]` | switch or drop a guild's model (admin) |
 | `/vibe on\|off` | run tool calls without approval cards, Jev screening the dangerous ones (admin) |
-| `/config show` · `/config set <key> <value>` · `/config reset <key>` | permissions, sandbox, models and policy — scope-checked (admin, or bot owner for the dangerous keys) |
+| `/settings` | point-and-click settings: category → key → on/off buttons, a choice menu, or a form (admin, owner for the dangerous keys) |
+| `/config show` · `/config set <key> <value>` · `/config reset <key>` | the same keys as text — handy for scripts and exact paths — scope-checked (admin, or bot owner for the dangerous keys) |
+| `/access show [user]` · `/access set <user> <key> <value>` · `/access block\|unblock\|clear <user>` | per-account permissions: rank, risk ceiling, tool and command lists (bot owner) |
 | `/new` | fresh opencode session for this channel |
 | `/abort` | interrupt the running task |
 | `/status` | servers, sessions, approvals, sandbox, policy, models, gateway, recent decisions |
@@ -212,16 +214,17 @@ Mentioning the bot or replying to one of its messages also starts a task.
 
 ## Tools the agent has
 
-26 capabilities, all authorised against the requester's rank before they run:
+30 capabilities, all authorised against the requester's rank before they run:
 
 | Risk | Tools |
 | --- | --- |
-| read | `guild_info`, `channels_list`, `channel_info`, `roles_list`, `member_list`, `member_info`, `messages_fetch` |
-| reversible | `channel_create`, `channel_update` (name/topic/slowmode/nsfw), `channel_move` (category/position), `thread_create`, `thread_update` (archive/lock/rename), `message_send`, `message_pin`, `role_create`, `role_update`, `role_assign`, `invite_create` |
+| read | `guild_info`, `channels_list`, `channel_info`, `roles_list`, `member_list`, `member_info`, `messages_fetch`, `git_status` |
+| reversible | `channel_create`, `channel_update` (name/topic/slowmode/nsfw), `channel_move` (category/position), `thread_create`, `thread_update` (archive/lock/rename), `message_send`, `message_pin`, `role_create`, `role_update`, `role_assign`, `invite_create`, `git_commit`, `git_push`, `git_repo_create` |
 | destructive | `channel_delete`, `permission_set` (allow/deny/clear overwrites), `role_delete`, `message_delete`, `member_timeout`, `member_kick`, `member_ban`, `bash` |
 
 Permission names are validated (`allow: ["ViewChannel"], deny: ["SendMessages"]`), colours must be `#rrggbb`, and
-`bash` is the shadowed builtin that runs through the sandbox.
+`bash` is the shadowed builtin that runs through the sandbox. The three `git_*` write tools only appear once a git
+server is configured (see [Git server](#git-server-optional)).
 
 ## Memory
 
@@ -274,6 +277,48 @@ Default ceilings — every cell is overridable per guild with `/config set polic
 | member | allow | ask | deny | deny |
 | guest / DM | allow | deny | deny | deny |
 
+### Three layers, strictest wins
+
+Every call — a bridge capability, or the agent server's own `bash`/`edit`/`webfetch` ask — is judged by three
+layers in order. Each returns `allow`, `ask` or `deny`; the pipeline takes the strictest, so no layer can loosen
+what another one refused, and a layer that cannot answer fails to `ask`.
+
+| Layer | What it is | Cost | Can it block? |
+| --- | --- | --- | --- |
+| **hard** | fixed rules in code: tool switches and deny/allow lists, command shapes, self-target rules, rank ceiling + matrix | free, deterministic | yes |
+| **Jev** | the independent classifier (`policy.vibe.*`, `JEV_MODE`) | one small remote call | yes, vetoes on evidence |
+| **agent review** | the guild's own primary model re-reads the call it is about to make (`policy.review.*`) | one turn on its own server | yes, `enforce` only |
+
+Hard rules are literal, have stable ids, and show up in `/audit` instead of a model's opinion:
+
+| Rule id | Refuses |
+| --- | --- |
+| `rm-root` | `rm` against `/`, `~`, `$HOME`, `/etc`, `/usr`, `/var` |
+| `mkfs`, `dd-device`, `power`, `fork-bomb`, `chmod-777-root`, `pipe-to-shell`, `drop-database` | the command shapes that have no safe reading |
+| `force-push`, `truncate-table`, `wipe-disk` | ask a human first |
+| `protected-target` | banning, kicking, timing out or role-stripping the server owner or the bot itself |
+| `administrator-grant` | `permission_set`/`role_create`/`role_update` that hands over `Administrator` |
+
+The allow list (`policy.tools.allow`) and read-only calls are the two shortcuts: the owner's allow list means
+"no cards for this tool, ever" and short-circuits the model layers, and reads have nothing to approve.
+
+The review layer is a **self-check**: the same model family proposed the call, so it catches wrong targets and
+actions nobody asked for — Jev remains the independent opinion. It runs in parallel with Jev, caches an identical
+call for 30 s, and is only consulted for a call that would otherwise run **unattended** — when the hard layer
+already says `ask`, a human is looking at the card anyway, so no model turn is spent there.
+
+| `policy.review.mode` | Effect |
+| --- | --- |
+| `off` | never ask the agent |
+| `shadow` | start the review and log the reading, never wait for it — the way to price the layer before enforcing |
+| `enforce` (default) | it can tighten the verdict; a failed, timed-out or unparseable review becomes `ask` |
+
+Measured on the default free-tier model, one review is **20-30 s** (a reasoning model answering one JSON
+object), which is what a vibe-mode auto-run pays per tool call; the timeout is 45 s and a timeout is
+fail-closed, so a slow provider degrades to a card rather than a silent run. A faster `model.primary`, or
+`policy.review.model: fast`, brings that down. `REVIEW_MODE=off` in `.env` is the deployment kill switch for
+the spend, and `policy.review.minConfidence` (0.5) decides how sure an "allow" has to be before it counts.
+
 ### Modes
 
 | `policy.mode` | What a call the ceiling does not allow outright does |
@@ -306,21 +351,119 @@ from a vibe-mode test: `message_send` allow (Jev: reversible, 0.67), `channel_de
 `permission_set Administrator` deny (0.45), `bash bun test` allow, `bash rm -rf /` deny (catastrophic),
 `edit /etc/passwd` ask (an unconfident "safe" reading).
 
-### `/config` — everything that is configurable
+### `/settings` — the panel, and `/config` — the same keys as text
+
+`/settings` is the way in: an ephemeral panel that never leaves your screen.
+
+```
+/settings  →  [ policy · policy and approvals   ]
+              [ features · tools and behaviour  ]
+              [ shell · sandbox                 ]   ← only if you may change it
+                       ↓ pick a category
+           [ mode            ask — anything the ceiling does not allow outright… ]
+           [ review.mode     enforce                                              ]
+           [ rank ceilings…  5 ranks × 4 risk classes                            ]
+                       ↓ pick a key
+           [ ask ] [ vibe ] [ locked ]        ← a menu of the values that parse
+           [ reset to default ] [ ← back ]
+```
+
+- the control matches the value type: **buttons** for on/off, a **menu** for a fixed set of values (with the
+  current one pre-selected), a **form** (`modal`) for free text, ids, model names and numbers;
+- the **rank ceilings** are two selects deep — rank, then risk class — instead of typing
+  `policy.matrix.trusted.destructive deny`;
+- every value shown is the value *in force*, and every value you can pick is one the parser accepts, because the
+  panel and `/config set` share `parseSetting`: a menu can never offer something the text command would refuse;
+- keys you may not change are not in the list at all, and the footer says why (`scopeNote`);
+- a change applies immediately; a `features.*` change also stops that guild's server so the next prompt picks up
+  the new tool list and persona.
 
 `/config show` prints the mode, the effective rank table (with `*` on cells this guild overrides), the sandbox,
-the models, and how many keys *you* may change. `/config set <key> <value>` and `/config reset <key>` are
-scope-checked before anything is written:
+the feature switches, the models, and how many keys *you* may change. `/config set <key> <value>` and
+`/config reset <key>` are the same keys, scope-checked the same way — reached through `applySetting`, the one
+write path both surfaces use:
 
 | Scope | Keys |
 | --- | --- |
-| guild admin | `policy.mode`, `policy.vibe.maxRisk|screen|minApproval|askOnUncertain`, `policy.tools.deny`, `model.primary`, `model.fast` |
-| **bot owner only** | `shell.mode` (`host` runs shell calls as the bot user), `shell.image`, `shell.fallback`, `policy.tools.allow` (bypasses the card for everyone), `policy.matrix.*` (20 cells), `roles.admin`, `roles.trusted`, `enabled` |
+| guild admin | `policy.mode`, `policy.vibe.maxRisk|screen|minApproval|askOnUncertain`, `policy.review.mode|minConfidence`, `policy.tools.deny`, `features.tools.disabled`, `features.clarify`, `model.primary`, `model.fast` |
+| **bot owner only** | `shell.mode` (`host` runs shell calls as the bot user), `shell.image`, `shell.fallback`, `policy.tools.allow` (bypasses the card for everyone), `policy.matrix.*` (20 cells), `roles.admin`, `roles.trusted`, `access.blocked`, `git.enabled`, `git.provider`, `git.baseUrl`, `git.owner`, `git.push`, `git.createRepos`, `git.visibility`, `enabled` |
 
 So a guild admin can make the bot chattier or stricter, but cannot turn the sandbox off, grant themselves a
 capability, rewrite the rank table, or widen what bypasses approval — those need `OWNER_ID` in `.env`.
 `/config reset` restores the schema default exactly (empty containers included), and every value is validated
 before the write, so a typo leaves the file untouched.
+
+### Per-account permissions
+
+Ranks cover groups; `access` covers one Discord account, by user id. It is **bot-owner only** (`/access …`),
+because `rank` pins a tier and that grants capability.
+
+```
+/access set user:<@someone> key:risk value:read                 # "may look, may not change anything"
+/access set user:<@someone> key:tools-allow value:messages_fetch,guild_info,channels_list
+/access set user:<@someone> key:rank value:admin                # full tools, no Discord role needed
+/access set user:<@someone> key:commands-deny value:config:set,config:reset,model:set,vibe
+/access block user:<@someone>                                   # may not use the bot at all
+/access unblock user:<@someone> · /access clear user:<@someone> · /access show [user]
+```
+
+| Key | Meaning |
+| --- | --- |
+| `rank` | pins the tier (`guest`…`owner`), replacing whatever their roles say — in both directions |
+| `risk` | highest risk class they may reach: `read`, `reversible`, `destructive`, `admin` |
+| `tools-allow` | whitelist: only these tools/sets (empty = inherit the guild's) |
+| `tools-deny` | blacklist: never these |
+| `commands-allow` / `commands-deny` | the same for slash commands — `config` blocks the whole group, `config:set` just that subcommand |
+
+So the three cases look like this:
+
+| Want | Set |
+| --- | --- |
+| "can only look for problems" | `risk: read` (or `tools-allow` on the read tools) |
+| "full access, cannot change settings" | `rank: admin` + `commands-deny: config:set,config:reset,model:set,vibe` |
+| "cannot use the bot at all" | `/access block` — no turns, no commands, no approvals |
+
+Precedence is the same everywhere: **blocked beats profile, profile beats guild.** A profile can only tighten
+what the guild already allows, with one exception — an explicit `rank` pin. Blocked accounts read as `guest` for
+every rank check, so `/config`, `/access` and approval buttons are closed to them automatically. The rules are
+enforced in three places from one profile: `hardCheck` (every tool call, `layer: user` in `/audit`),
+`accessGuard` (every slash command) and `promptAccess` (mentions and replies that would start a turn).
+
+`/access set` validates against the real tables — rank names, risk classes, registered tool/set names and the
+registered command list — so a typo fails loudly instead of silently leaving access on. Note the reminder: a
+blocked account that is also in `access.users` keeps its profile, so unblocking restores the limits.
+
+### Feature flags
+
+Two switches change what the agent *is*, not what a rank may do. Both narrow only, so a guild admin owns them,
+both are re-rendered at provisioning, and `/config set` stops that guild's server so the next prompt picks them up.
+
+`features.tools.disabled` — a comma-separated list of tools and/or sets. A disabled tool is not in the model's
+tool list at all (not described, not offered), and the gate refuses it anyway, so a stale client cannot slip one
+through. Sets: `discord` (everything that talks to Discord), `server`, `channels`, `messages`, `threads`,
+`members`, `roles`, `permissions`, `invites`, `shell` (the sandboxed `bash`), or any single tool name.
+
+```
+/config set features.tools.disabled discord     # read-only-ish: no Discord writes at all
+/config set features.tools.disabled shell       # no shell; opencode's builtin bash is denied too
+/config set features.tools.disabled channels,member_ban
+/config reset features.tools.disabled
+```
+
+Switching `bash` off also writes `permission.bash: "deny"` into the workspace config: removing the generated
+tool would otherwise let the pinned server's own bash (host, unsandboxed) back in.
+
+`features.clarify` — how hard the persona pushes the agent to ask instead of assuming:
+
+| Level | Behaviour |
+| --- | --- |
+| `off` | take the obvious reading, act, then say what was assumed |
+| `normal` (default) | one clarifying question when a destructive target is ambiguous |
+| `high` | state the reading used and what else it could have meant; ask before anything that changes state |
+| `always` | never resolve an ambiguity itself: every state-changing request gets a question listing the exact options and ids first |
+
+`clarify` shapes how the model talks to you; it does not change approvals. Approval strictness is the matrix
+(`policy.matrix.<rank>.<risk>`) and `policy.mode`, which are owner-scoped on purpose.
 
 Models run wherever `.env` points them. The default **primary** is the keyless free tier; the default
 **fast** model runs on the **OpenCode Go** subscription: provider `opencode-go`, base URL
@@ -352,6 +495,51 @@ Every workspace is a git repo with an initial commit. Inside `repo/` the agent m
 approval card** — that is the code sandbox, each turn is committed (`agent: turn …`), and `/undo` reverts the last
 turn. Control files stay denied to the agent (`opencode.json`, `AGENTS.md`, `.opencode/**`, `MEMORY.md`), and any
 edit outside `repo/` still asks a human.
+
+**Commits are written, not optional.** `commitWorkspace` (`src/services/git/workspace.ts`) runs after every turn,
+after every learned-skill write and at provisioning, with the bot's own identity
+(`open-discord-agent <agent@open-discord-agent>`). The workspace `AGENTS.md` says so in a `## Git` section, so the
+agent knows its edits are snapshotted and that it may add an explicit commit of its own (`git_commit`) — it never
+needs to commit to make edits safe, and `/undo` depends on that history existing.
+
+### Git server (optional)
+
+Any Forgejo, Gitea or GitLab instance can back the workspace. The token stays in `.env`; whether a guild may use
+it is config, so no credential ever lands in `config/guilds.json` or in a workspace the agent can read.
+
+```bash
+# .env
+GIT_TOKEN=<token>            # Gitea/Forgejo: write:repository (+ write:user to create repos); GitLab: api
+GIT_BASE_URL=https://git.example.com
+GIT_OWNER=some-group         # optional default owner for new repos
+```
+
+```
+/config set git.enabled true          # both owner-only: this ships code off the machine
+/config set git.provider forgejo      # forgejo | gitea | gitlab
+/config set git.baseUrl https://git.example.com
+/config set git.owner some-group      # repos the bot creates land here (empty = personal namespace)
+/config set git.push true             # push after every commit: each turn, each artifact write
+/config set git.createRepos true      # let the agent create repositories
+/config set git.visibility private    # private | public
+```
+
+What the agent gets, and only when it is configured:
+
+| Tool | Risk | Does |
+| --- | --- | --- |
+| `git_status` | read | branch, remote, uncommitted files, unpushed commits, last 5 commits |
+| `git_commit` | reversible | commit with the agent's own message, then push |
+| `git_push` | reversible | push the current branch (hidden when no server is configured) |
+| `git_repo_create` | reversible | create a repo on the server, optionally attach it as `origin` (hidden unless `git.createRepos`) |
+
+`git_push` and `git_repo_create` are not in the model's tool list at all until a server is configured — a tool
+that can only fail is a tool the model wastes turns on. `features.tools.disabled: git` switches the whole set off.
+The push URL is built per call (`authedRemote`), so the token is never written into the workspace `.git/config`,
+and every error message passes through `redact` before it reaches a log line or the model.
+
+`git_repo_create` creates a repository but never deletes one, and `attachOrigin` refuses to replace an existing
+`origin` — one workspace, one home for its history.
 
 ## Ops (Linux VM)
 
