@@ -3,8 +3,17 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { config, paths } from '@services/config.ts';
-import { authedRemote, redact, repoFromResponse, repoRequest, resolveForge } from '@services/git/forge.ts';
+import {
+  authedRemote,
+  createRepo,
+  redact,
+  refusalDetail,
+  repoFromResponse,
+  repoRequest,
+  resolveForge,
+} from '@services/git/forge.ts';
 import { commitNow, commitWorkspace, describeWorkspace, pushWorkspace } from '@services/git/workspace.ts';
+import { clearSecret, setSecret } from '@services/secrets/store.ts';
 import { renderAgentsFile, renderDiscordToolFile } from '@services/workspace/codegen.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 
@@ -207,5 +216,59 @@ describe('git in the generated workspace', () => {
     expect(file).not.toContain('export const git_commit');
     expect(file).not.toContain('export const git_status');
     expect(config.git('hidden').enabled).toBe(false);
+  });
+
+  test('a refused create says what the server said, not just "refused"', () => {
+    // the three shapes Gitea uses for the three things that actually go wrong
+    expect(
+      refusalDetail('{"message":"token does not have at least one of required scope(s): [write:repository]"}', 403),
+    ).toContain('write:repository');
+    // a 404 while an owner is set is almost always "that is a username, not an org"
+    expect(refusalDetail('{"message":"user does not exist [id: 0]"}', 404)).toContain(
+      'git.owner must be an organisation',
+    );
+    expect(refusalDetail('{"message":"repository already exists"}', 409)).toContain('already exists');
+    // GitLab's shape, and a body that is not JSON at all
+    expect(refusalDetail('{"error":"insufficient_scope"}', 403)).toContain('insufficient_scope');
+    expect(refusalDetail('<html>bad gateway</html>', 502)).toBe('<html>bad gateway</html>');
+  });
+
+  test('createRepo returns the refusal instead of swallowing it', async () => {
+    const realFetch = globalThis.fetch;
+    const guildId = 'forge-refusal';
+    useGuilds({
+      [guildId]: {
+        'enabled': true,
+        'git': { 'enabled': true, 'provider': 'gitea', 'createRepos': true, 'baseUrl': 'https://git.test' },
+      },
+    });
+    // a per-server token through the same store the dashboard writes to
+    setSecret({ guildId, 'name': 'git.token', 'value': 'gitea-token-for-the-test-0001', 'by': 'test' });
+    try {
+      globalThis.fetch = (async () =>
+        new Response('{"message":"token does not have at least one of required scope(s): [write:repository]"}', {
+          'status': 403,
+        })) as unknown as typeof fetch;
+      const refused = await createRepo(guildId, 'probe');
+      expect(refused.ok).toBe(false);
+      if (refused.ok) throw new Error('unreachable');
+      expect(refused.status).toBe(403);
+      expect(refused.detail).toContain('write:repository');
+
+      globalThis.fetch = (async () =>
+        new Response(
+          '{"clone_url":"https://git.test/me/probe.git","html_url":"https://git.test/me/probe","name":"probe"}',
+          {
+            'status': 201,
+          },
+        )) as unknown as typeof fetch;
+      const created = await createRepo(guildId, 'probe');
+      expect(created.ok).toBe(true);
+      if (!created.ok) throw new Error('unreachable');
+      expect(created.repo.cloneUrl).toBe('https://git.test/me/probe.git');
+    } finally {
+      globalThis.fetch = realFetch;
+      clearSecret(guildId, 'git.token');
+    }
   });
 });

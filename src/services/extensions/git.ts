@@ -67,8 +67,11 @@ const tools: ExtensionCapability[] = [
         throw new Error('creating repositories is off here (git.createRepos is false)');
       const name = requireStr(args, 'name');
       if (!/^[\w.-]{1,64}$/.test(name)) throw new Error(`"${name}" is not a usable repository name`);
-      const repo = await createRepo(ctx.guild.id, name);
-      if (!repo) throw new Error('the git server refused the create request (see the bot log)');
+      const outcome = await createRepo(ctx.guild.id, name);
+      // The provider's own words, not "refused": that is the difference between "fix your token" and "fix my code".
+      if (!outcome.ok)
+        throw new Error(`the git server refused the create request (${outcome.status}): ${outcome.detail}`);
+      const repo = outcome.repo;
       const attached = args.attach === true ? attachOrigin(ctx.guild.id, repo.cloneUrl) : undefined;
       return [
         `created ${repo.name}: ${repo.htmlUrl}`,

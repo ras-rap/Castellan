@@ -104,7 +104,11 @@ export function describeWorkspace(guildId: string): string {
   return [
     `branch: ${branch || 'unknown'}`,
     `remote: ${origin || 'none'}`,
-    `server: ${target ? `${target.provider} ${target.baseUrl}` : 'not configured'}`,
+    `server: ${
+      target
+        ? `${target.provider} ${target.baseUrl}${target.owner.length > 0 ? ` (repos created under ${target.owner})` : ''}`
+        : 'not configured'
+    }`,
     `auto-push: ${config.git(guildId).push && target ? 'on' : 'off'}`,
     pending.length === 0 ? 'working tree: clean' : `uncommitted (${pending.length}):\n${pending.join('\n')}`,
     behind.length > 0 && Number.isFinite(Number(behind)) ? `unpushed commits: ${behind}` : '',

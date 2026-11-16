@@ -94,12 +94,50 @@ export function authedRemote(target: ForgeTarget, cloneUrl: string): string {
   return url.toString();
 }
 
-/** Creates one repository. Returns `undefined` when the server refuses or the guild has it switched off. */
-export async function createRepo(guildId: string, name: string): Promise<ForgeRepo | undefined> {
+/**
+ * What the server said when a create failed. Gitea/Forgejo answer `{ message }` (and sometimes `{ errors }`),
+ * GitLab answers `{ message }` or `{ error }`; the text is the only way to tell "bad scope" from "no such org"
+ * from "it already exists", so it travels back to the caller instead of into a discarded log line.
+ */
+export function refusalDetail(text: string, status: number): string {
+  let detail = text.trim();
+  try {
+    const parsed = JSON.parse(text) as { message?: unknown; error?: unknown; errors?: unknown };
+    const parts = [parsed.message, parsed.error]
+      .filter((part): part is string => typeof part === 'string' && part.length > 0)
+      .map(part => part.trim());
+    if (Array.isArray(parsed.errors))
+      for (const entry of parsed.errors) {
+        const message =
+          typeof entry === 'string'
+            ? entry
+            : typeof (entry as { message?: unknown })?.message === 'string'
+              ? String((entry as { message: string }).message)
+              : '';
+        if (message.length > 0) parts.push(message);
+      }
+
+    if (parts.length > 0) detail = parts.join('; ');
+  } catch {
+    // not JSON: keep the body as-is, it is all we have
+  }
+  if (status === 409) return 'a repository with that name already exists — attach it instead of creating it';
+  if (status === 404 && detail.length > 0)
+    return `${detail} — git.owner must be an organisation the token may create in; leave it empty to create under the token's own user`;
+  if (status === 401) return `the token was rejected (${detail.slice(0, 180)})`;
+  if (status === 403)
+    return `the token is not allowed to create repositories here (${detail.slice(0, 180)}) — it needs write:repository, and its user needs create rights in git.owner`;
+  return detail.slice(0, 220) || `HTTP ${status}`;
+}
+
+export type CreateOutcome = { ok: true; repo: ForgeRepo } | { ok: false; status: number | 'network'; detail: string };
+
+/** Creates one repository, and says why when the server refuses: the reason is what the asker needs. */
+export async function createRepo(guildId: string, name: string): Promise<CreateOutcome> {
   const target = resolveForge(guildId);
   if (!target) {
     logger.warn('repo create requested without a configured git server', { guildId });
-    return undefined;
+    return { 'ok': false, 'status': 'network', 'detail': 'no git server is configured for this server' };
   }
   const request = repoRequest(target, name);
   try {
@@ -111,22 +149,20 @@ export async function createRepo(guildId: string, name: string): Promise<ForgeRe
     });
     const text = await response.text();
     if (!response.ok) {
-      logger.warn('repo create failed', {
-        guildId,
-        'status': response.status,
-        'body': redact(text, target.token).slice(0, 200),
-      });
-      return undefined;
+      const detail = refusalDetail(redact(text, target.token), response.status);
+      logger.warn('repo create failed', { guildId, 'status': response.status, detail });
+      return { 'ok': false, 'status': response.status, detail };
     }
     const repo = repoFromResponse(JSON.parse(text));
     if (!repo) {
       logger.warn('repo create returned no clone url', { guildId, 'body': redact(text, target.token).slice(0, 200) });
-      return undefined;
+      return { 'ok': false, 'status': response.status, 'detail': 'the server answered without a clone URL' };
     }
     logger.info('repo created', { guildId, 'provider': target.provider, 'repo': repo.name });
-    return repo;
+    return { 'ok': true, repo };
   } catch (error) {
-    logger.warn('repo create threw', { guildId, 'error': redact(String(error), target.token).slice(0, 200) });
-    return undefined;
+    const detail = redact(String(error), target.token).slice(0, 200);
+    logger.warn('repo create threw', { guildId, 'error': detail });
+    return { 'ok': false, 'status': 'network', detail };
   }
 }

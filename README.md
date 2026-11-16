@@ -633,7 +633,7 @@ GIT_OWNER=some-group         # optional default owner for new repos
 /config set git.enabled true          # both owner-only: this ships code off the machine
 /config set git.provider forgejo      # forgejo | gitea | gitlab
 /config set git.baseUrl https://git.example.com
-/config set git.owner some-group      # repos the bot creates land here (empty = personal namespace)
+/config set git.owner some-group      # an ORGANISATION the token may create in (empty = the token's own user)
 /config set git.push true             # push after every commit: each turn, each artifact write
 /config set git.createRepos true      # let the agent create repositories
 /config set git.visibility private    # private | public
@@ -647,6 +647,11 @@ What the agent gets, and only when it is configured:
 | `git_commit` | reversible | commit with the agent's own message, then push |
 | `git_push` | reversible | push the current branch (hidden when no server is configured) |
 | `git_repo_create` | reversible | create a repo on the server, optionally attach it as `origin` (hidden unless `git.createRepos`) |
+
+A create the server refuses comes back with the server's own words, mapped to the thing to fix: `403` names the
+missing `write:repository` scope and the `git.owner` permission, `404` says the owner is not an organisation,
+`409` says the name is taken and to attach it instead. `git_status` prints the owner too, so a wrong namespace is
+visible before the first attempt.
 
 `git_push` and `git_repo_create` are not in the model's tool list at all until a server is configured — a tool
 that can only fail is a tool the model wastes turns on. `features.tools.disabled: git` switches the whole set off.
