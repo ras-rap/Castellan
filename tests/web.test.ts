@@ -233,6 +233,12 @@ describe('the dashboard over http', () => {
     try {
       expect((await call('/api/me')).status).toBe(401);
 
+      // `curl -I` and uptime monitors probe with HEAD: that must not read as "dashboard down" (it did once)
+      const head = await realFetch(`http://127.0.0.1:${server.port}/healthz`, { 'method': 'HEAD' });
+      expect(head.status).toBe(200);
+      expect(head.headers.get('content-type')).toContain('application/json');
+      expect(await realFetch(`http://127.0.0.1:${server.port}/`, { 'method': 'HEAD' })).toMatchObject({ 'status': 200 });
+
       // the page is public (it must be, to start a sign-in) and carries the publishable key, nothing else
       const page = await realFetch(`http://127.0.0.1:${server.port}/`);
       expect(page.status).toBe(200);

@@ -106,10 +106,13 @@ export function startWeb(input: {
     'hostname': input.hostname ?? '127.0.0.1',
     async fetch(request) {
       const url = new URL(request.url);
+      // `HEAD` is `GET` without a body — `curl -I`, uptime monitors and some proxies probe that way, and a 404 for
+      // them would look like a dead dashboard. Routing treats them alike; Bun drops the body for HEAD.
+      const method = request.method === 'HEAD' ? 'GET' : request.method;
 
       // Unauthenticated liveness only: the proxy and systemd need something to poll, and it says nothing else.
-      if (request.method === 'GET' && url.pathname === '/healthz') return json({ 'ok': true, 'service': 'dashboard' });
-      if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html'))
+      if (method === 'GET' && url.pathname === '/healthz') return json({ 'ok': true, 'service': 'dashboard' });
+      if (method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html'))
         return new Response(PAGE.replaceAll('__CLERK_KEY__', input.publishableKey), {
           'headers': { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
         });
@@ -124,7 +127,7 @@ export function startWeb(input: {
         guilds.map(guild => guild.id),
       );
 
-      if (request.method === 'GET' && url.pathname === '/api/me') {
+      if (method === 'GET' && url.pathname === '/api/me') {
         if (principal.kind === 'nobody')
           return json({ 'error': 'no access', 'detail': 'your account has no permissions here' }, 403);
         return json({
@@ -143,7 +146,7 @@ export function startWeb(input: {
       if (!visible.includes(guildId))
         return json({ 'error': 'forbidden', 'detail': 'this account does not manage that server' }, 403);
 
-      if (request.method === 'GET' && !wantsAccess) {
+      if (method === 'GET' && !wantsAccess) {
         const verdict = canEditSetting(principal, {
           guildId,
           'path': 'features.clarify',
@@ -158,12 +161,12 @@ export function startWeb(input: {
         });
       }
 
-      if (request.method === 'GET' && wantsAccess) {
+      if (method === 'GET' && wantsAccess) {
         const verdict = canManageAccess(principal, guildId, guildEnabled(guildId));
         return json({ 'access': config.access(guildId), 'canEdit': verdict });
       }
 
-      if (request.method === 'PATCH' && !wantsAccess) {
+      if (method === 'PATCH' && !wantsAccess) {
         const body = (await request.json().catch(() => undefined)) as { path?: unknown; raw?: unknown } | undefined;
         const path = typeof body?.path === 'string' ? body.path : '';
         if (path.length === 0) return json({ 'error': 'bad request', 'detail': 'path is required' }, 400);
@@ -182,7 +185,7 @@ export function startWeb(input: {
         return json({ 'ok': true, 'value': applied.value, 'reloaded': applied.reloaded });
       }
 
-      if (request.method === 'PUT' && wantsAccess) {
+      if (method === 'PUT' && wantsAccess) {
         const verdict = canManageAccess(principal, guildId, guildEnabled(guildId));
         if (!verdict.allowed) return json({ 'error': 'forbidden', 'detail': verdict.reason }, 403);
         const body = (await request.json().catch(() => undefined)) as Record<string, unknown> | undefined;
