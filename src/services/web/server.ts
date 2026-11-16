@@ -106,6 +106,25 @@ export function startWeb(input: {
     'hostname': input.hostname ?? '127.0.0.1',
     async fetch(request) {
       const url = new URL(request.url);
+      try {
+        return await route(request, url);
+      } catch (error) {
+        // Never let a handler bug drop the socket: nginx would turn that into an opaque 502 and the page would
+        // report "HTTP 502" with no clue. A JSON 500 carries the reason to the browser and the log.
+        logger.error('dashboard request failed', {
+          'path': url.pathname,
+          'error': String(error instanceof Error ? error.message : error).slice(0, 300),
+        });
+        return json(
+          { 'error': 'internal error', 'detail': String(error instanceof Error ? error.message : error) },
+          500,
+        );
+      }
+    },
+  });
+
+  async function route(request: Request, url: URL): Promise<Response> {
+    {
       // `HEAD` is `GET` without a body — `curl -I`, uptime monitors and some proxies probe that way, and a 404 for
       // them would look like a dead dashboard. Routing treats them alike; Bun drops the body for HEAD.
       const method = request.method === 'HEAD' ? 'GET' : request.method;
@@ -211,8 +230,8 @@ export function startWeb(input: {
       }
 
       return json({ 'error': 'method not allowed' }, 405);
-    },
-  });
+    }
+  }
 }
 
 /** Boot hook: no publishable key or port means the dashboard simply does not exist. */

@@ -114,6 +114,32 @@ describe('clerk session tokens', () => {
   });
 });
 
+describe('failures stay readable', () => {
+  const token = [
+    Buffer.from(JSON.stringify({ 'alg': 'RS256', 'kid': 'k' })).toString('base64url'),
+    'payload',
+    'sig',
+  ].join('.');
+
+  test('a JWKS without a usable RSA key is "no session", never a throw', async () => {
+    // an EC key or a malformed modulus used to reach crypto.subtle.importKey and throw, which dropped the socket
+    await expect(
+      verifyJwt(
+        token,
+        { 'keys': [{ 'kid': 'k', 'kty': 'EC', 'crv': 'P-256', 'x': 'x', 'y': 'y' }] },
+        { 'issuer': ISSUER },
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      verifyJwt(
+        token,
+        { 'keys': [{ 'kid': 'k', 'kty': 'RSA', 'n': 'not base64', 'e': 'AQAB' }] },
+        { 'issuer': ISSUER },
+      ),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe('who may do what', () => {
   const baseConfig: WebConfig = {
     'owners': ['boss@example.com'],

@@ -3,112 +3,272 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
     <title>Castellan · control</title>
+    <script>
+      (function () {
+        var saved = localStorage.getItem('castellan-theme');
+        var dark = saved ? saved === 'dark' : !window.matchMedia('(prefers-color-scheme: light)').matches;
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      })();
+    </script>
     <style>
-      :root {
-        color-scheme: light dark;
-        --bg: #0f1115;
-        --panel: #171a21;
-        --line: #262b36;
-        --fg: #e6e8ec;
-        --muted: #9aa3b2;
-        --accent: #4f8cff;
-        --ok: #2fbf71;
-        --warn: #d9a52b;
+      :root[data-theme='dark'] {
+        --bg: #0a0b0d;
+        --surface: #101216;
+        --surface-2: #14171c;
+        --line: #1f2329;
+        --line-strong: #2a3038;
+        --fg: #e8eaee;
+        --fg-dim: #b6bdc9;
+        --muted: #7e8896;
+        --accent: #8b9cff;
+        --accent-dim: #2a2f4a;
+        --ok: #3ecf8e;
+        --warn: #e2b03c;
+        --err: #f2616c;
+        --radius: 10px;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+      }
+      :root[data-theme='light'] {
+        --bg: #f7f8fa;
+        --surface: #ffffff;
+        --surface-2: #f2f4f7;
+        --line: #e4e7ec;
+        --line-strong: #d0d5dd;
+        --fg: #101828;
+        --fg-dim: #344054;
+        --muted: #667085;
+        --accent: #4f5bd5;
+        --accent-dim: #e8eaff;
+        --ok: #12805c;
+        --warn: #b54708;
+        --err: #b42318;
       }
       * { box-sizing: border-box; }
+      html, body { height: 100%; }
       body {
         margin: 0;
-        padding: 2rem 1.25rem 4rem;
         background: var(--bg);
         color: var(--fg);
-        font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        font: 14px/1.55 var(--sans);
+        -webkit-font-smoothing: antialiased;
       }
-      main { max-width: 62rem; margin: 0 auto; }
-      h1 { font-size: 1.15rem; margin: 0 0 0.25rem; letter-spacing: 0.01em; }
-      h2 { font-size: 1rem; margin: 1.75rem 0 0.5rem; }
-      h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 1.25rem 0 0.5rem; }
+      a { color: inherit; }
+      .shell { display: grid; grid-template-columns: 264px minmax(0, 1fr); min-height: 100vh; }
+
+      /* ---------- sidebar ---------- */
+      aside {
+        background: var(--surface);
+        border-right: 1px solid var(--line);
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .brand { display: flex; align-items: center; gap: 10px; padding: 18px 16px 14px; }
+      .mark {
+        width: 26px; height: 26px; border-radius: 7px; flex: none;
+        background: linear-gradient(150deg, var(--accent), var(--ok));
+        box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+      }
+      .brand h1 { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: 0.01em; }
+      .brand small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+      .nav { padding: 4px 8px; overflow-y: auto; flex: 1; }
+      .nav-label {
+        font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+        color: var(--muted); padding: 14px 8px 6px;
+      }
+      .nav button {
+        width: 100%; display: flex; align-items: center; gap: 8px; justify-content: space-between;
+        background: transparent; border: 0; color: var(--fg-dim); font: inherit;
+        padding: 8px 10px; border-radius: 8px; cursor: pointer; text-align: left;
+      }
+      .nav button:hover { background: var(--surface-2); color: var(--fg); }
+      .nav button[aria-current="true"] { background: var(--accent-dim); color: var(--fg); }
+      aside footer { border-top: 1px solid var(--line); padding: 12px; display: grid; gap: 8px; }
+      .who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--fg-dim); }
+      #user-button { flex: none; }
+
+      /* ---------- main ---------- */
+      main { min-width: 0; display: flex; flex-direction: column; }
+      header.top {
+        position: sticky; top: 0; z-index: 5;
+        background: color-mix(in srgb, var(--bg) 88%, transparent);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid var(--line);
+        padding: 14px 22px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      }
+      header.top h2 { font-size: 15px; margin: 0; font-weight: 600; }
+      header.top .id { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+      .spacer { flex: 1; }
+      .content { padding: 18px 22px 64px; max-width: 1080px; width: 100%; }
+      .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 4px 0 18px; }
+      .tabs button {
+        background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+        font: inherit; padding: 8px 10px; cursor: pointer; margin-bottom: -1px;
+      }
+      .tabs button:hover { color: var(--fg-dim); }
+      .tabs button[aria-current="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+
+      /* ---------- building blocks ---------- */
+      section { margin-bottom: 26px; }
+      h3 {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+        color: var(--muted); margin: 0 0 8px; font-weight: 600;
+      }
+      .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+      .card + .card { margin-top: 10px; }
+      .card .head {
+        padding: 10px 14px; border-bottom: 1px solid var(--line);
+        display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg-dim);
+      }
+      .card .body { padding: 14px; }
+      .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
       .muted { color: var(--muted); }
-      .row { display: flex; gap: 0.75rem; align-items: baseline; flex-wrap: wrap; }
-      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; margin-top: 0.75rem; }
+      .mono { font-family: var(--mono); font-size: 12px; }
+      .pill {
+        display: inline-flex; align-items: center; gap: 5px; font-size: 11px; line-height: 1;
+        padding: 4px 7px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--muted);
+        white-space: nowrap;
+      }
+      .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+      .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+      .pill.err { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); background: color-mix(in srgb, var(--err) 10%, transparent); }
+      .pill.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-dim); }
+      .hidden { display: none !important; }
+
       table { width: 100%; border-collapse: collapse; }
-      td, th { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-      th { font-weight: 600; color: var(--muted); font-size: 0.8rem; }
-      td.path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; white-space: nowrap; }
-      td.desc { color: var(--muted); font-size: 0.82rem; }
+      th {
+        text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+        color: var(--muted); font-weight: 600; padding: 8px 14px; border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+      }
+      td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      tr:last-child td { border-bottom: 0; }
+      tbody tr:hover { background: color-mix(in srgb, var(--fg) 3%, transparent); }
+      td.key { font-family: var(--mono); font-size: 12px; white-space: nowrap; color: var(--fg); }
+      td.why { color: var(--muted); font-size: 12px; }
+      td.act { width: 1%; white-space: nowrap; text-align: right; }
+
       input[type="text"], select, textarea {
-        background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
-        padding: 0.3rem 0.45rem; font: inherit; min-width: 10rem;
+        background: var(--bg); color: var(--fg); border: 1px solid var(--line-strong);
+        border-radius: 7px; padding: 6px 8px; font: inherit; min-width: 9rem; max-width: 100%;
       }
-      textarea { width: 100%; min-height: 8rem; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+      input[type="text"]:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-dim); border-color: var(--accent); }
+      input:disabled, select:disabled, textarea:disabled { opacity: 0.55; }
+      label.check { display: inline-flex; align-items: center; gap: 5px; margin: 0 12px 6px 0; font-size: 12.5px; color: var(--fg-dim); }
+      textarea { width: 100%; min-height: 10rem; font-family: var(--mono); font-size: 12px; }
       button {
-        background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 0.35rem 0.7rem;
-        font: inherit; cursor: pointer;
+        background: var(--surface-2); color: var(--fg); border: 1px solid var(--line-strong);
+        border-radius: 7px; padding: 6px 11px; font: inherit; cursor: pointer;
       }
-      button.ghost { background: transparent; border: 1px solid var(--line); color: var(--fg); }
+      button:hover:not(:disabled) { border-color: var(--accent); color: var(--fg); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #0a0b0d; font-weight: 600; }
+      button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+      button.ghost { background: transparent; }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
-      .guild { display: flex; gap: 0.6rem; align-items: center; padding: 0.4rem 0.6rem; border: 1px solid var(--line);
-        border-radius: 8px; margin-top: 0.4rem; cursor: pointer; background: transparent; color: var(--fg); }
-      .guild[data-active="true"] { border-color: var(--accent); }
-      .pill { font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-      .pill.ok { color: var(--ok); border-color: var(--ok); }
-      .pill.warn { color: var(--warn); border-color: var(--warn); }
-      .save { min-width: 4.5rem; }
-      .status { min-height: 1.2rem; font-size: 0.82rem; color: var(--muted); }
-      code { font-family: ui-monospace, monospace; font-size: 0.85em; }
-      .hidden { display: none; }
+      .status { font-size: 12px; color: var(--muted); min-height: 18px; }
+      .status.error { color: var(--err); }
+      .empty { padding: 26px 14px; text-align: center; color: var(--muted); font-size: 13px; }
+      .grid-2 { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .ext { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+      .ext p { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
+      .ext h4 { margin: 0; font-size: 13px; font-weight: 600; }
+      #signin { display: grid; place-items: center; padding: 40px 16px; }
+      @media (max-width: 860px) {
+        .shell { grid-template-columns: 1fr; }
+        aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+        .nav { max-height: 40vh; }
+        .content { padding: 16px 14px 48px; }
+      }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Castellan <span class="muted">control panel</span></h1>
-      <div class="row">
-        <div id="user-button"></div>
-        <span id="who" class="muted">checking your session…</span>
-        <span id="role" class="pill hidden"></span>
-      </div>
-      <div id="status" class="status"></div>
-
-      <div id="signin" class="hidden">
-        <div id="signin-mount"></div>
-      </div>
-
-      <section id="app" class="hidden">
-        <h2>Servers</h2>
-        <p class="muted" id="scope-note"></p>
-        <div id="guilds"></div>
-
-        <section id="detail" class="hidden">
-          <h2 id="detail-name">Server</h2>
-          <div class="row">
-            <span class="muted" id="detail-id"></span>
-            <span id="detail-enabled" class="pill"></span>
-            <span class="muted" id="detail-why"></span>
+    <div class="shell">
+      <aside>
+        <div class="brand">
+          <div class="mark"></div>
+          <h1>Castellan <small>control panel</small></h1>
+        </div>
+        <nav class="nav">
+          <div class="nav-label">Servers</div>
+          <div id="nav-guilds"></div>
+          <div id="nav-empty" class="empty hidden">none linked</div>
+        </nav>
+        <footer>
+          <div class="row" style="justify-content: space-between">
+            <span id="role" class="pill hidden"></span>
+            <button id="theme" class="ghost" title="toggle theme">◐</button>
           </div>
-          <h2>Extensions</h2>
-          <p class="muted">
-            One extension owns a set of tools. Switch one off and its tools disappear for this server only —
-            <code>features.extensions.disabled</code> below is the same list.
-          </p>
-          <div id="extensions"></div>
+          <div class="who">
+            <div id="user-button"></div>
+            <span id="who">checking your session…</span>
+          </div>
+        </footer>
+      </aside>
 
-          <div id="groups"></div>
+      <main>
+        <header class="top">
+          <h2 id="title">Castellan</h2>
+          <span id="guild-id" class="id"></span>
+          <span id="guild-state" class="pill hidden"></span>
+          <div class="spacer"></div>
+          <div id="status" class="status"></div>
+        </header>
 
-          <h2>Per-account permissions</h2>
-          <div class="card">
-            <p class="muted">
-              <code>blocked</code>: accounts the bot ignores. <code>users</code>: one profile per account —
-              <code>rank</code>, <code>risk</code>, <code>tools.allow/deny</code>, <code>commands.allow/deny</code>.
-            </p>
-            <textarea id="access-json" spellcheck="false"></textarea>
-            <div class="row" style="margin-top: 0.6rem">
-              <button id="access-save" class="save">save access</button>
-              <span class="status" id="access-status"></span>
+        <div class="content">
+          <div id="signin" class="hidden"><div id="signin-mount"></div></div>
+
+          <section id="app" class="hidden">
+            <p id="scope-note" class="muted" style="margin: 0 0 14px"></p>
+            <div class="tabs" role="tablist">
+              <button id="tab-settings" role="tab" aria-current="true">Settings</button>
+              <button id="tab-extensions" role="tab">Extensions</button>
+              <button id="tab-access" role="tab">Access</button>
             </div>
-          </div>
-        </section>
-      </section>
-    </main>
+
+            <div id="pane-settings"><div id="groups"></div></div>
+
+            <div id="pane-extensions" class="hidden">
+              <section>
+                <h3>Installed extensions</h3>
+                <div id="extensions" class="grid-2"></div>
+                <p class="muted" style="font-size: 12px; margin-top: 10px">
+                  One extension owns a set of tools. Switching one off removes its tools for this server only —
+                  it is the same list as <span class="mono">features.extensions.disabled</span>.
+                </p>
+              </section>
+            </div>
+
+            <div id="pane-access" class="hidden">
+              <section>
+                <h3>Per-account permissions</h3>
+                <div class="card">
+                  <div class="body">
+                    <p class="muted" style="margin-top: 0; font-size: 12.5px">
+                      <span class="mono">blocked</span>: accounts the bot ignores entirely.
+                      <span class="mono">users</span>: one profile per account —
+                      <span class="mono">rank</span>, <span class="mono">risk</span>,
+                      <span class="mono">tools.allow/deny</span>, <span class="mono">commands.allow/deny</span>.
+                    </p>
+                    <textarea id="access-json" spellcheck="false"></textarea>
+                    <div class="row" style="margin-top: 10px">
+                      <button id="access-save" class="primary">Save access</button>
+                      <span class="status" id="access-status"></span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
 
     <script>
       // Filled in by the server: the key, and the Frontend API host that key encodes.
@@ -128,10 +288,8 @@
       const say = (message, kind = 'muted') => {
         const el = $('status');
         el.textContent = message;
-        el.style.color = kind === 'error' ? 'var(--warn)' : 'var(--muted)';
+        el.classList.toggle('error', kind === 'error');
       };
-
-      /** Surfaces every failure on the page instead of leaving "checking your session…" forever. */
       const fail = error => {
         say(String(error?.message ?? error), 'error');
         $('who').textContent = 'not signed in';
@@ -139,7 +297,13 @@
       window.addEventListener('error', event => fail(event.error ?? event.message));
       window.addEventListener('unhandledrejection', event => fail(event.reason));
 
-      /** Clerk's own loader pattern: one script tag per bundle, both from the Frontend API host. */
+      // the attribute is already set by the head script; the button just flips and remembers it
+      $('theme').onclick = () => {
+        const dark = document.documentElement.dataset.theme !== 'dark';
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        localStorage.setItem('castellan-theme', dark ? 'dark' : 'light');
+      };
+
       function loadScript(src, attributes = {}) {
         return new Promise((resolve, reject) => {
           const script = document.createElement('script');
@@ -168,13 +332,11 @@
       }
 
       /**
-       * The two bundles Clerk documents for a plain HTML page: `@clerk/ui` first, then `@clerk/clerk-js`,
-       * both served by the Frontend API host that the publishable key encodes — not by a CDN of my choosing.
-       * `data-clerk-publishable-key` is what makes the global `Clerk` a ready instance.
+       * Clerk's documented bundles, both served by the Frontend API host that the publishable key encodes —
+       * `@clerk/ui` first (it defines the UI constructor), then `@clerk/clerk-js` with the key on the tag.
        */
       async function loadClerk() {
-        // Validate the injected *values*, never compare them to the template tokens: the server replaces those
-        // tokens everywhere in this file, including inside string literals.
+        // Validate the injected values, never compare them to the template tokens (the server rewrites those).
         if (!CLERK.publishableKey?.startsWith('pk_'))
           throw new Error('CLERK_PUBLISHABLE_KEY is missing or not a Clerk publishable key (pk_test_… / pk_live_…)');
         if (!/^https?:\/\/[^/]+$/.test(CLERK.fapi ?? ''))
@@ -205,8 +367,10 @@
           }
           show('signin');
           hide('app');
-          hide('detail');
+          hide('guild-state');
           hide('role');
+          $('title').textContent = 'Castellan';
+          $('guild-id').textContent = '';
           $('who').textContent = 'not signed in';
           say('sign in to continue');
           return;
@@ -217,7 +381,6 @@
           clerk.mountUserButton($('user-button'));
           userButtonMounted = true;
         }
-        // A session token is a JWT; the server verifies it against Clerk's published keys on every request.
         token = (await clerk.session?.getToken()) ?? '';
         if (!token) {
           say('signed in, but Clerk returned no session token — check the session settings', 'error');
@@ -233,7 +396,7 @@
 
         $('who').textContent = me.email ?? 'signed in';
         const role = $('role');
-        role.className = 'pill ok';
+        role.className = `pill ${me.role === 'guild' ? 'accent' : 'ok'}`;
         role.textContent = me.role === 'owner' ? 'bot owner' : me.role === 'admin' ? 'full access' : 'server owner';
         show('role');
         $('scope-note').textContent =
@@ -242,25 +405,35 @@
             : 'Full control: every server and every bot-wide setting.';
         show('app');
 
-        const host = $('guilds');
-        host.replaceChildren();
+        const nav = $('nav-guilds');
+        nav.replaceChildren();
         for (const guild of me.guilds) {
           const button = document.createElement('button');
-          button.className = 'guild';
           button.dataset.id = guild.id;
-          const name = document.createElement('strong');
+          button.className = 'guild';
+          const name = document.createElement('span');
           name.textContent = guild.name;
           const state = document.createElement('span');
           state.className = `pill ${guild.enabled ? 'ok' : 'warn'}`;
-          state.textContent = guild.enabled ? 'approved' : 'not approved';
+          state.textContent = guild.enabled ? 'live' : 'pending';
           button.append(name, state);
           button.onclick = () => openGuild(guild.id).catch(error => say(String(error.message ?? error), 'error'));
-          host.append(button);
+          nav.append(button);
         }
+        $('nav-empty').classList.toggle('hidden', me.guilds.length > 0);
         if (me.guilds.length === 0) say('no servers are linked to your account yet');
         else say('');
         if (me.guilds.length > 0) await openGuild(me.guilds[0].id);
       }
+
+      function selectTab(tab) {
+        for (const name of ['settings', 'extensions', 'access']) {
+          $(`tab-${name}`).setAttribute('aria-current', String(name === tab));
+          $(`pane-${name}`).classList.toggle('hidden', name !== tab);
+        }
+      }
+      for (const name of ['settings', 'extensions', 'access'])
+        $(`tab-${name}`).onclick = () => selectTab(name);
 
       /** One input control per value kind, matching what the setting parser accepts. */
       function control(entry) {
@@ -269,19 +442,17 @@
           const chosen = new Set(Array.isArray(entry.value) ? entry.value : []);
           for (const choice of entry.choices) {
             const label = document.createElement('label');
-            label.style.marginRight = '0.75rem';
-            label.style.whiteSpace = 'nowrap';
+            label.className = 'check';
             const box = document.createElement('input');
             box.type = 'checkbox';
             box.value = choice;
             box.checked = chosen.has(choice);
-            box.style.marginRight = '0.25rem';
             label.append(box, document.createTextNode(choice));
             boxes.append(label);
           }
           return boxes;
         }
-        if ((entry.kind === 'boolean' || (entry.kind === 'choice' && entry.choices.length > 0))) {
+        if (entry.kind === 'boolean' || (entry.kind === 'choice' && entry.choices.length > 0)) {
           const select = document.createElement('select');
           const values = entry.kind === 'boolean' ? ['true', 'false'] : entry.choices;
           for (const value of values) {
@@ -303,11 +474,14 @@
       function renderGroups(groups) {
         const host = $('groups');
         host.replaceChildren();
+        if (groups.length === 0) {
+          host.innerHTML = '<div class="empty">nothing you may change in this server</div>';
+          return;
+        }
         for (const group of groups) {
+          const section = document.createElement('section');
           const heading = document.createElement('h3');
           heading.textContent = group.category;
-          host.append(heading);
-
           const card = document.createElement('div');
           card.className = 'card';
           const table = document.createElement('table');
@@ -316,22 +490,22 @@
 
           for (const entry of group.entries) {
             const tr = document.createElement('tr');
-
-            const name = document.createElement('td');
-            name.className = 'path';
-            name.textContent = entry.label;
-            name.title = entry.path;
+            const key = document.createElement('td');
+            key.className = 'key';
+            key.textContent = entry.label;
+            key.title = entry.path;
 
             const value = document.createElement('td');
             const input = control(entry);
             input.disabled = !entry.editable;
             value.append(input);
             const hint = document.createElement('div');
-            hint.className = 'desc';
+            hint.className = 'why';
             hint.textContent = entry.editable ? entry.description : `${entry.description} — ${entry.reason}`;
             value.append(hint);
 
-            const action = document.createElement('td');
+            const act = document.createElement('td');
+            act.className = 'act';
             const save = document.createElement('button');
             save.className = 'save';
             save.textContent = 'save';
@@ -353,53 +527,59 @@
                 save.disabled = false;
               }
             };
-            action.append(save);
-
-            tr.append(name, value, action);
+            act.append(save);
+            tr.append(key, value, act);
             tbody.append(tr);
           }
-
           table.append(tbody);
           card.append(table);
-          host.append(card);
+          section.append(heading, card);
+          host.append(section);
         }
       }
 
-      /** Extensions are their own switch list: name, tool count, and why it is off if it is. */
       function renderExtensions(extensions) {
         const host = $('extensions');
         host.replaceChildren();
+        if (extensions.length === 0) {
+          host.innerHTML = '<div class="empty">no extensions</div>';
+          return;
+        }
         for (const extension of extensions) {
+          const card = document.createElement('div');
+          card.className = 'card';
+          const body = document.createElement('div');
+          body.className = 'body';
           const row = document.createElement('div');
-          row.className = 'card';
-          const title = document.createElement('strong');
-          title.textContent = `${extension.id} — ${extension.name}`;
+          row.className = 'ext';
+          const left = document.createElement('div');
+          const title = document.createElement('h4');
+          title.textContent = extension.name;
+          const id = document.createElement('div');
+          id.className = 'mono muted';
+          id.textContent = `${extension.id} · ${extension.tools} tools`;
+          const detail = document.createElement('p');
+          detail.textContent = extension.available ? extension.description : extension.reason || 'not configured';
+          left.append(title, id, detail);
           const state = document.createElement('span');
           state.className = `pill ${extension.enabled && extension.available ? 'ok' : 'warn'}`;
-          state.textContent = !extension.enabled ? 'switched off' : extension.available ? 'on' : 'not configured';
-          state.style.marginLeft = '0.5rem';
-          const detail = document.createElement('div');
-          detail.className = 'desc';
-          detail.textContent = extension.available
-            ? `${extension.description} · ${extension.tools} tools`
-            : `${extension.description} · ${extension.reason || 'not configured'}`;
-          row.append(title, state, detail);
-          host.append(row);
+          state.textContent = !extension.enabled ? 'off' : extension.available ? 'on' : 'unconfigured';
+          row.append(left, state);
+          body.append(row);
+          card.append(body);
+          host.append(card);
         }
       }
 
       async function openGuild(id) {
         active = id;
         const detail = await api(`/api/guilds/${id}`);
-        $('detail').classList.remove('hidden');
-        $('detail-name').textContent = detail.guild.name ?? id;
-        $('detail-id').textContent = id;
-        const enabled = $('detail-enabled');
-        enabled.textContent = detail.guild.enabled ? 'approved' : 'not approved';
-        enabled.className = `pill ${detail.guild.enabled ? 'ok' : 'warn'}`;
-        $('detail-why').textContent = detail.canEdit.allowed
-          ? `you are editing as: ${detail.canEdit.reason}`
-          : detail.canEdit.reason;
+        $('title').textContent = detail.guild.name ?? id;
+        $('guild-id').textContent = id;
+        const state = $('guild-state');
+        state.textContent = detail.guild.enabled ? 'approved' : 'not approved';
+        state.className = `pill ${detail.guild.enabled ? 'ok' : 'warn'}`;
+        show('guild-state');
         renderGroups(detail.groups);
         renderExtensions(detail.extensions ?? []);
 
@@ -408,9 +588,15 @@
         area.value = access ? JSON.stringify(access.access, null, 2) : '{}';
         area.disabled = !access?.canEdit.allowed;
         $('access-save').disabled = !access?.canEdit.allowed;
-        $('access-status').textContent = access?.canEdit.allowed ? '' : (access?.canEdit.reason ?? '');
+        $('access-status').textContent = access?.canEdit.allowed
+          ? detail.canEdit.allowed
+            ? `you are editing as: ${detail.canEdit.reason}`
+            : detail.canEdit.reason
+          : (access?.canEdit.reason ?? '');
+        $('access-status').classList.toggle('error', !access?.canEdit.allowed);
 
-        for (const button of document.querySelectorAll('.guild')) button.dataset.active = String(button.dataset.id === id);
+        for (const button of document.querySelectorAll('#nav-guilds .guild'))
+          button.setAttribute('aria-current', String(button.dataset.id === id));
       }
 
       $('access-save').onclick = async () => {
@@ -418,8 +604,10 @@
           const parsed = JSON.parse($('access-json').value);
           await api(`/api/guilds/${active}/access`, { method: 'PUT', body: JSON.stringify(parsed) });
           $('access-status').textContent = 'saved';
+          $('access-status').classList.remove('error');
         } catch (error) {
           $('access-status').textContent = String(error.message ?? error);
+          $('access-status').classList.add('error');
         }
       };
 

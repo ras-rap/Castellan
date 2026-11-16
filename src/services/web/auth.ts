@@ -12,7 +12,17 @@ export type ClerkClaims = {
   [claim: string]: unknown;
 };
 
-export type Jwk = { kid?: string; kty: string; n?: string; e?: string; alg?: string; use?: string };
+export type Jwk = {
+  kid?: string;
+  kty: string;
+  n?: string;
+  e?: string;
+  crv?: string;
+  x?: string;
+  y?: string;
+  alg?: string;
+  use?: string;
+};
 export type Jwks = { keys: Jwk[] };
 
 const SKEW_SECONDS = 30;
@@ -102,22 +112,30 @@ export async function verifyJwt(
   if (!header || !payload) return undefined;
   if (header.alg !== 'RS256') return undefined;
 
+  // Only RSA keys can verify RS256; a JWKS may publish several key types, and a mismatch is "no session", not a
+  // thrown request (an unhandled throw here closed the socket and surfaced as a 502 through nginx).
   const key = jwks.keys.find(candidate => candidate.kid === header.kid) ?? jwks.keys[0];
-  if (!key?.n || !key.e) return undefined;
+  if (key?.kty !== 'RSA' || !key.n || !key.e) return undefined;
 
-  const cryptoKey = await crypto.subtle.importKey(
-    'jwk',
-    { 'kty': 'RSA', 'n': key.n, 'e': key.e, 'alg': 'RS256', 'ext': true },
-    { 'name': 'RSASSA-PKCS1-v1_5', 'hash': 'SHA-256' },
-    false,
-    ['verify'],
-  );
-  const valid = await crypto.subtle.verify(
-    'RSASSA-PKCS1-v1_5',
-    cryptoKey,
-    base64UrlToBytes(rawSignature),
-    new TextEncoder().encode(`${rawHeader}.${rawPayload}`),
-  );
+  let valid = false;
+  try {
+    const cryptoKey = await crypto.subtle.importKey(
+      'jwk',
+      { 'kty': 'RSA', 'n': key.n, 'e': key.e, 'alg': 'RS256', 'ext': true },
+      { 'name': 'RSASSA-PKCS1-v1_5', 'hash': 'SHA-256' },
+      false,
+      ['verify'],
+    );
+    valid = await crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5',
+      cryptoKey,
+      base64UrlToBytes(rawSignature),
+      new TextEncoder().encode(`${rawHeader}.${rawPayload}`),
+    );
+  } catch (error) {
+    logger.warn('clerk token verification failed', { 'error': String(error).slice(0, 160) });
+    return undefined;
+  }
   if (!valid) return undefined;
 
   const now = options.now ?? Math.floor(Date.now() / 1000);
