@@ -27,6 +27,7 @@ import {
   type QuestionAsked,
 } from './events.ts';
 import { models } from './models.ts';
+import { summariseThinking } from './thinking.ts';
 
 import type { Supervisor } from './supervisor.ts';
 import type { Client, GuildMember, TextChannel } from 'discord.js';
@@ -162,7 +163,15 @@ export class Runtime {
       'actor_id': input.actorId,
     });
 
-    const renderer = new StreamRenderer(input.channel, '🧠 thinking…');
+    // Summaries come from the fast model. If that role is not usable here (no Go credential, for instance),
+    // fall back to the main model exactly once per turn rather than never showing any progress at all.
+    let usedPrimary = false;
+    const renderer = new StreamRenderer(input.channel, '🧠 thinking…', async text => {
+      const quick = await summariseThinking({ server, 'guildId': input.guildId, text });
+      if (quick || usedPrimary) return quick;
+      usedPrimary = true;
+      return summariseThinking({ server, 'guildId': input.guildId, text, 'role': 'primary', 'timeoutMs': 20_000 });
+    });
     await renderer.start();
 
     const stream: Stream = {

@@ -2,6 +2,12 @@ import type { Message, TextChannel } from 'discord.js';
 
 const LIMIT = 1990;
 const EDIT_INTERVAL_MS = 1200;
+/** How often the thinking line may be re-summarised: one cheap model call per window, not per token. */
+const SUMMARY_INTERVAL_MS = 4000;
+/** Only ask again once the reasoning has grown by this much, so a repeated summary is not requested. */
+const SUMMARY_MIN_GROWTH = 400;
+/** A turn gets a bounded number of summaries; after that the line simply stays put. */
+const SUMMARY_MAX = 8;
 /** Reserved for the `<@id> ` mention that prefixes the answer, so the first chunk still fits Discord's 2000. */
 const MENTION_RESERVE = 32;
 
@@ -62,10 +68,18 @@ export class StreamRenderer {
   private readonly reasoning = new Map<string, string>();
   private readonly startedAt = Date.now();
   private elapsed = 0;
+  /** The fast model's one-line description of what is being worked out; replaces the raw reasoning live. */
+  private summary = '';
+  private summarising = false;
+  private summaries = 0;
+  private lastSummaryAt = 0;
+  private lastSummaryLength = 0;
 
   constructor(
     private readonly channel: TextChannel,
     private readonly preview: string,
+    /** Injected by the runtime: the fast model summarising the reasoning seen so far. */
+    private readonly summarise?: (text: string) => Promise<string | undefined>,
   ) {}
 
   async start(): Promise<void> {
@@ -84,12 +98,10 @@ export class StreamRenderer {
     const body = this.buffer.length > 1500 ? `…${this.buffer.slice(-1500)}` : this.buffer;
     const composed = `${body}${status}`.trim();
     if (composed.length > 0) return composed.slice(0, LIMIT);
-    // No answer text yet: show the thinking as it arrives, which is the only visible progress during a long
-    // reasoning pass (the server publishes reasoning as parts, never as text deltas).
-    const thinking = this.thinkingText();
-    if (thinking.length === 0) return this.preview;
-    const tail = thinking.length > 700 ? `…${thinking.slice(-700)}` : thinking;
-    return `🧠 thinking…\n\n> ${tail.split('\n').join('\n> ')}`.slice(0, LIMIT);
+    // No answer text yet: show the fast model's one-line summary of the reasoning. The raw reasoning is kept
+    // for the finished log; streaming it live is what made the message edit on every part.
+    if (this.summary.length === 0) return this.preview;
+    return `🧠 ${this.summary}`.slice(0, LIMIT);
   }
 
   /** Called on every terminal tool call: the log lists what happened, not each status transition. */
@@ -101,7 +113,36 @@ export class StreamRenderer {
 
   setReasoning(partId: string, text: string): void {
     this.reasoning.set(partId, text);
+    this.maybeSummarise();
     this.schedule();
+  }
+
+  /**
+   * Ask the fast model for a fresh one-liner, at most once per window and only when the reasoning has actually
+   * grown. Fire-and-forget: the turn keeps streaming while this runs, and the message is edited when it lands.
+   */
+  private maybeSummarise(): void {
+    if (!this.summarise || this.closed || this.summarising) return;
+    if (this.summaries >= SUMMARY_MAX) return;
+    if (Date.now() - this.lastSummaryAt < SUMMARY_INTERVAL_MS) return;
+    const thinking = this.thinkingText();
+    if (thinking.length - this.lastSummaryLength < SUMMARY_MIN_GROWTH && this.summaries > 0) return;
+
+    this.summarising = true;
+    this.lastSummaryAt = Date.now();
+    this.lastSummaryLength = thinking.length;
+    void this.summarise(thinking)
+      .then(summary => {
+        if (summary && summary !== this.summary) {
+          this.summary = summary;
+          this.summaries += 1;
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.summarising = false;
+        this.schedule();
+      });
   }
 
   /**

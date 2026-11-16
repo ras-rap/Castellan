@@ -192,8 +192,8 @@ Mentioning the bot or replying to one of its messages also starts a task.
 
 ### What a turn looks like in the channel
 
-1. one message says `🧠 thinking…` and is edited in place — the partial answer, the current tool call, and the
-   model's reasoning as it is published — so the channel never fills with tool chatter;
+1. one message says `🧠 thinking…` and is edited in place — the partial answer, the current tool call, and (see
+   4) a one-line summary of the reasoning — so the channel never fills with tool chatter;
 2. when the turn ends that message stays as the turn's **log** (`🧠 log · 42s · 3 steps`, the tool calls in
    order, then the chain of thought as a quote) and the answer is posted as its **own message that pings
    whoever asked** (long answers continue in follow-up chunks, mention on the first only). Reasoning only
@@ -201,13 +201,17 @@ Mentioning the bot or replying to one of its messages also starts a task.
    alone;
 3. approval cards are removed the moment they are decided, expired, or the turn ends — the record stays in
    `/audit` instead of in the channel;
-4. a **round that ends on a failed tool call is continued, not accepted**: the same session is prompted again
+4. while the agent reasons, the live line shows a **one-line summary from the `fast` model** (`🧠 …`), not the
+   raw chain of thought — the stream is re-edited only when a new summary lands (at most every 4 s, at most 8 per
+   turn), instead of on every reasoning part. If `fast` is unusable here, the `primary` model is asked once per
+   turn; if neither answers, the line simply stays put. The full reasoning still lands in the finished log;
+5. a **round that ends on a failed tool call is continued, not accepted**: the same session is prompted again
    with the error in hand (`🔁 … asking it to finish`), twice at most. That is what turns "Plan confirmed —
    building…" plus a denied `write` into an actual result, or into an answer that says it could not do it;
-5. if it still ends on failures, the answer carries a `⚠️ N tool call(s) failed` quote listing the tool and the
+6. if it still ends on failures, the answer carries a `⚠️ N tool call(s) failed` quote listing the tool and the
    error, so a turn can never read as a clean success when something broke. A policy refusal is recorded in
    `/audit` (`layer: vibe`) whether it was made by a human or by Jev;
-6. a turn is abandoned only after `IDLE_TIMEOUT_MS` (10 min) of **silence** — continuous streaming or tool
+7. a turn is abandoned only after `IDLE_TIMEOUT_MS` (10 min) of **silence** — continuous streaming or tool
    calls reset that clock, so slow work is never killed. On a timeout the session is aborted, the channel is
    rebound to a fresh session so the next message works normally, and the partial output is posted with a
    `⏱️ interrupted` note.
