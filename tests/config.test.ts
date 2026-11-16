@@ -13,7 +13,7 @@ import { decide, vibeVerdict } from '@services/policy/gate.ts';
 import { ceilingFor, hardCheck, shellRule, strictest, tierOf } from '@services/policy/hard.ts';
 import { parseReview } from '@services/policy/review.ts';
 import { defaultFor, describeSetting, parseSetting, settingByPath, SETTINGS } from '@services/policy/settings.ts';
-import { renderDiscordToolFile, renderWorkspaceConfig } from '@services/workspace/codegen.ts';
+import { renderAgentsFile, renderDiscordToolFile, renderWorkspaceConfig } from '@services/workspace/codegen.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 
 /** `GUILDS_FILE` is read per call, so each test can own the guild registry without touching config/. */
@@ -508,6 +508,36 @@ describe('feature flags', () => {
     expect(file).not.toContain('export const channel_create');
     expect(file).toContain('export const message_send');
     expect(file).toContain('export const shell');
+  });
+
+  test('host mode writes no host-shell restrictions, docker mode writes all of them', () => {
+    // the same generator, two guilds: one trusted with the bot user, one sandboxed
+    useGuilds({
+      'd': { 'enabled': true },
+      'h': { 'enabled': true, 'shell': { 'mode': 'host' } },
+    });
+    const docker = JSON.parse(renderWorkspaceConfig('d')) as {
+      tools: Record<string, unknown>;
+      permission: Record<string, unknown>;
+    };
+    const host = JSON.parse(renderWorkspaceConfig('h')) as {
+      tools: Record<string, unknown>;
+      permission: Record<string, unknown>;
+    };
+    expect(docker.tools.bash).toBe(false);
+    expect(docker.permission.bash).toBe('deny');
+    expect(docker.permission.external_directory).toBe('deny');
+    // host mode: raw bash is the owner's decision, so nothing denies it and nothing confines file tools
+    expect(host.tools.bash).toBeUndefined();
+    expect(host.permission.bash).toBeUndefined();
+    expect(host.permission.external_directory).toBeUndefined();
+    // both modes keep our own shell behind a card and keep the control files denied
+    expect(host.permission.shell).toEqual({ '*': 'ask' });
+    expect((host.permission.edit as Record<string, string>)['opencode.json']).toBe('deny');
+    // and the agent is told which of the two worlds it is in
+    expect(renderAgentsFile('Sandboxed', 'd')).toContain('There is no host shell: `bash` is refused');
+    expect(renderAgentsFile('Trusted', 'h')).toContain('owner allowed host execution');
+    expect(renderAgentsFile('Trusted', 'h')).not.toContain('There is no host shell');
   });
 
   test('the host shell is never offered, and switching ours off does not bring it back', () => {

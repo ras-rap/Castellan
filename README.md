@@ -429,13 +429,15 @@ Host mode is not a bigger sandbox, it is *no* sandbox: the agent's shell runs wi
 sees `DISCORD_TOKEN`, the git and panel keys and the console token, and can read anything the bot user can. Keep
 it to servers whose operators you would give a bot-user shell to anyway.
 
-`shell` is also the **only** shell. opencode ships its own `bash` tool, which runs in the server process, on the
-host, next to `.env` — and 1.19.5 ignores `tools: { bash: false }` and `permission: { bash: "deny" }` for it
-(measured: the tool ran either way), so no config key can be trusted to remove it. A plugin hook can: the bot
-writes `castellan-guard.ts` into its own opencode config dir (`XDG_CONFIG_HOME` per spawn), and
-`tool.execute.before` throws for opencode's `bash` — the call never reaches the OS — and for any host file tool
-aimed outside the workspace (`../`, `/etc/...`). The hook is inert without `BRIDGE_TOKEN`, so an opencode you run
-yourself on that machine keeps its own shell.
+In **docker** mode `shell` is the only shell. opencode ships its own `bash` tool, which runs in the server
+process, on the host, next to `.env` — and 1.19.5 ignores `tools: { bash: false }` and
+`permission: { bash: "deny" }` for it (measured: the tool ran either way), so no config key can be trusted to
+remove it. A plugin hook can: the bot writes `castellan-guard.ts` into its own opencode config dir
+(`XDG_CONFIG_HOME` per spawn), and `tool.execute.before` throws for opencode's `bash` — the call never reaches
+the OS — and for any host file tool aimed outside the workspace (`../`, `/etc/...`). The spawn also passes
+`CASTELLAN_SHELL_MODE`, so a **host**-mode guild keeps opencode's raw `bash`: that owner already handed this
+server the machine, and pretending otherwise only confused the agent. The hook is inert without `BRIDGE_TOKEN`
+too, so an opencode you run yourself on that machine keeps its own shell.
 
 ### Per-account permissions
 
@@ -530,7 +532,7 @@ when they exist for a guild, and is switched on or off per server — so "add to
 | Extension | Tools | Available when |
 | --- | --- | --- |
 | `discord` | 25 channels/roles/members/messages/threads/invites/permissions tools | always |
-| `shell` | `shell` (shown to the model as `discord_shell`) | always — the guild's `shell.mode` decides container vs host |
+| `shell` | `shell` (shown to the model as `discord_shell`) | always — the guild's `shell.mode` decides container vs host, and host mode also keeps opencode's raw `bash` |
 | `git` | `git_status`, `git_commit`; `git_push`, `git_repo_create` when a forge is configured | as declared per tool |
 | `pterodactyl` | 15 panel tools; the application-API half needs `pterodactyl.admin`, the file trio needs `pterodactyl.files` | a panel key + `pterodactyl.enabled` |
 

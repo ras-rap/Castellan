@@ -6,6 +6,7 @@ import { workspaces } from '@services/database/sqlite.ts';
 import { consoleToken } from '@services/policy/jev.ts';
 import { configHome, ensureGuardPlugin } from '@services/workspace/guard.ts';
 import { provisionWorkspace } from '@services/workspace/provision.ts';
+import { shellModeOf } from '@services/workspace/shell.ts';
 import { log } from '@utils/logger.ts';
 
 import { assertPinnedBinary } from './binary.ts';
@@ -84,6 +85,8 @@ export class Supervisor {
         'BRIDGE_URL': `http://${config.bridge.host}:${config.bridge.port}/rpc`,
         'BRIDGE_TOKEN': workspace.bridgeToken,
         'BRIDGE_GUILD': guildId,
+        // Read by the guard plugin: host mode keeps opencode's raw bash, docker mode refuses it.
+        'CASTELLAN_SHELL_MODE': shellModeOf(guildId),
         // The workspace config references credentials as `{env:…}`, so the credential the OAuth file holds
         // has to be present in this process's environment — it is never written into the workspace itself.
         'OPENCODE_GO_API_KEY': consoleToken() ?? '',

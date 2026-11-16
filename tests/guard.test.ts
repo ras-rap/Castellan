@@ -8,6 +8,7 @@ const loadGuard = async () => {
   ensureGuardPlugin();
   // what the supervisor puts in the server's environment; the guard is inert without it
   process.env.BRIDGE_TOKEN = 'test-token';
+  process.env.CASTELLAN_SHELL_MODE = 'docker';
   const module = await import(`${guardPath()}?v=${Date.now()}`);
   return module.CastellanGuard as () => Promise<Record<string, (input: any, output: any) => Promise<void>>>;
 };
@@ -50,6 +51,17 @@ describe('the host-shell guard plugin', () => {
       expect(Object.keys(await guard())).toEqual([]);
     } finally {
       if (token !== undefined) process.env.BRIDGE_TOKEN = token;
+    }
+  });
+
+  test('host mode keeps opencode’s raw bash — the owner already gave that server the machine', async () => {
+    const guard = await loadGuard();
+    process.env.BRIDGE_TOKEN = 'test-token';
+    process.env.CASTELLAN_SHELL_MODE = 'host';
+    try {
+      expect(Object.keys(await guard())).toEqual([]);
+    } finally {
+      process.env.CASTELLAN_SHELL_MODE = 'docker';
     }
   });
 });
