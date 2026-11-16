@@ -237,7 +237,9 @@ describe('the dashboard over http', () => {
       const head = await realFetch(`http://127.0.0.1:${server.port}/healthz`, { 'method': 'HEAD' });
       expect(head.status).toBe(200);
       expect(head.headers.get('content-type')).toContain('application/json');
-      expect(await realFetch(`http://127.0.0.1:${server.port}/`, { 'method': 'HEAD' })).toMatchObject({ 'status': 200 });
+      expect(await realFetch(`http://127.0.0.1:${server.port}/`, { 'method': 'HEAD' })).toMatchObject({
+        'status': 200,
+      });
 
       // the page is public (it must be, to start a sign-in) and carries the publishable key, nothing else
       const page = await realFetch(`http://127.0.0.1:${server.port}/`);
