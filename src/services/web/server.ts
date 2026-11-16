@@ -142,6 +142,12 @@ export function startWeb(input: {
 
       const principal = await principalOf(request, input.issuer);
       if (principal instanceof Response) return principal;
+      if (principal.kind === 'nobody')
+        logger.info('dashboard denied', {
+          'clerkId': principal.clerkId,
+          'email': principal.email ?? '(no email in the session token or Clerk lookup)',
+          'path': url.pathname,
+        });
 
       const guilds = guildFacts();
       const visible = visibleGuilds(
@@ -151,7 +157,18 @@ export function startWeb(input: {
 
       if (method === 'GET' && url.pathname === '/api/me') {
         if (principal.kind === 'nobody')
-          return json({ 'error': 'no access', 'detail': 'your account has no permissions here' }, 403);
+          return json(
+            {
+              'error': 'no access',
+              // Say what the server matched against: the usual cause is a people list that was never reached
+              // because the session token carried no email and no Backend API key was set.
+              'detail':
+                `your account has no permissions here (matched on ${principal.clerkId}` +
+                `${principal.email ? ` / ${principal.email}` : ' — no email available'})`,
+              'identity': { 'clerkId': principal.clerkId, 'email': principal.email ?? null },
+            },
+            403,
+          );
         return json({
           'role': principal.kind,
           'email': principal.email ?? null,

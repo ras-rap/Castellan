@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { config } from '@services/config.ts';
 import { services } from '@services/discord/services.ts';
-import { clearJwksCache, issuerFromPublishableKey, verifyJwt, type Jwks } from '@services/web/auth.ts';
+import { authenticate, clearJwksCache, issuerFromPublishableKey, verifyJwt, type Jwks } from '@services/web/auth.ts';
 import {
   canEditSetting,
   canManageAccess,
@@ -111,6 +111,52 @@ describe('clerk session tokens', () => {
     const unsigned = `${token.split('.')[0]}.${token.split('.')[1]}.${Buffer.from('nope').toString('base64url')}`;
     expect(await verifyJwt(unsigned, jwks, { 'issuer': ISSUER, now })).toBeUndefined();
     expect(await verifyJwt('not.a.token', jwks, { 'issuer': ISSUER, now })).toBeUndefined();
+  });
+});
+
+describe('identity when the token has no email', () => {
+  test('the email comes from the Clerk Backend API and satisfies the people lists', async () => {
+    const { pair, jwks } = await keyPair();
+    stubJwks(jwks);
+    const calls: string[] = [];
+    const previous = { 'base': process.env.CLERK_API_BASE, 'secret': process.env.CLERK_SECRET_KEY };
+    process.env.CLERK_API_BASE = 'https://clerk.api.test';
+    process.env.CLERK_SECRET_KEY = 'sk_test_probe';
+
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith('https://clerk.api.test/v1/users/')) {
+        calls.push(url);
+        expect((init?.headers as Record<string, string>).authorization).toBe('Bearer sk_test_probe');
+        return Response.json({
+          'email_addresses': [
+            { 'id': 'idn_2', 'email_address': 'Other@Example.com' },
+            { 'id': 'idn_1', 'email_address': 'Boss@Example.com' },
+          ],
+          'primary_email_address_id': 'idn_1',
+        });
+      }
+      return real(input as never, init);
+    }) as typeof fetch;
+
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      // a Clerk default token: sub + iss + exp, no email claim
+      const token = await sign(pair, { 'sub': 'user_boss', 'iss': ISSUER, 'exp': now + 600 });
+      const claims = await authenticate(`Bearer ${token}`, { 'issuer': ISSUER });
+      expect(claims?.email).toBe('boss@example.com');
+      expect(claims?.emailSource).toBe('clerk-backend-api');
+      // the primary address is the one chosen, and the lookup is cached
+      await authenticate(`Bearer ${token}`, { 'issuer': ISSUER });
+      expect(calls).toHaveLength(1);
+    } finally {
+      globalThis.fetch = real;
+      if (previous.base === undefined) delete process.env.CLERK_API_BASE;
+      else process.env.CLERK_API_BASE = previous.base;
+      if (previous.secret === undefined) delete process.env.CLERK_SECRET_KEY;
+      else process.env.CLERK_SECRET_KEY = previous.secret;
+    }
   });
 });
 

@@ -1,3 +1,4 @@
+import { optionalEnv } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 
 const logger = log('web/auth');
@@ -6,6 +7,8 @@ const logger = log('web/auth');
 export type ClerkClaims = {
   sub: string;
   email?: string;
+  /** Where the email came from, so a 403 can say what the server actually matched against. */
+  emailSource?: 'session-token' | 'clerk-backend-api';
   iss?: string;
   exp?: number;
   nbf?: number;
@@ -146,8 +149,51 @@ export async function verifyJwt(
   const sub = typeof payload.sub === 'string' ? payload.sub : '';
   if (sub.length === 0) return undefined;
 
-  const email = typeof payload.email === 'string' ? payload.email.toLowerCase() : undefined;
-  return { ...payload, sub, ...(email ? { email } : {}) } as ClerkClaims;
+  // Clerk's default session token has `sub` and no email; some templates add one of these names.
+  const claimEmail = [payload.email, payload.email_address, payload.primary_email_address].find(
+    (value): value is string => typeof value === 'string' && value.includes('@'),
+  );
+  const email = claimEmail?.toLowerCase();
+  return { ...payload, sub, ...(email ? { email, 'emailSource': 'session-token' as const } : {}) } as ClerkClaims;
+}
+
+const emailCache = new Map<string, { email?: string; at: number }>();
+const EMAIL_TTL_MS = 5 * 60_000;
+
+/**
+ * The signed-in user's email, from Clerk's Backend API. A session token only guarantees `sub`, and the
+ * dashboard's people lists are keyed by email, so the server asks Clerk instead of demanding a customised
+ * token template. Cached for five minutes per user; any failure is simply "no email".
+ */
+export async function emailForClerkUser(userId: string): Promise<string | undefined> {
+  const cached = emailCache.get(userId);
+  if (cached && Date.now() - cached.at < EMAIL_TTL_MS) return cached.email;
+  const secret = optionalEnv('CLERK_SECRET_KEY');
+  if (!secret) return undefined;
+  // Read per call, not at import: a test (or a late `.env`) must be able to point this somewhere else.
+  const base = (optionalEnv('CLERK_API_BASE') ?? 'https://api.clerk.com').replace(/\/+$/, '');
+  try {
+    const response = await fetch(`${base}/v1/users/${encodeURIComponent(userId)}`, {
+      'headers': { 'authorization': `Bearer ${secret}` },
+      'signal': AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      logger.warn('clerk user lookup failed', { 'userId': userId, 'status': response.status });
+      return undefined;
+    }
+    const body = (await response.json()) as {
+      'email_addresses'?: Array<{ 'id'?: string; 'email_address'?: string }>;
+      'primary_email_address_id'?: string;
+    };
+    const addresses = body.email_addresses ?? [];
+    const primary = addresses.find(address => address.id === body.primary_email_address_id) ?? addresses[0];
+    const email = primary?.email_address?.toLowerCase();
+    emailCache.set(userId, { email, 'at': Date.now() });
+    return email;
+  } catch (error) {
+    logger.warn('clerk user lookup threw', { 'userId': userId, 'error': String(error).slice(0, 160) });
+    return undefined;
+  }
 }
 
 /** Authorization header → verified claims, using the configured issuer's published keys. */
@@ -160,10 +206,14 @@ export async function authenticate(
   const jwks = await fetchJwks(jwksUrl(options.issuer));
   if (!jwks) return undefined;
   const claims = await verifyJwt(token, jwks, options);
-  if (!claims) {
-    // A key rotation is the one legitimate reason a valid token fails: retry once with fresh keys.
-    const refreshed = await fetchJwks(jwksUrl(options.issuer), true);
-    return refreshed ? verifyJwt(token, refreshed, options) : undefined;
+  if (claims && !claims.email) {
+    // Only fill the gap: a token that already carries the email is authoritative and costs no API call.
+    const email = await emailForClerkUser(claims.sub);
+    if (email) return { ...claims, email, 'emailSource': 'clerk-backend-api' };
   }
-  return claims;
+  if (claims) return claims;
+
+  // A key rotation is the one legitimate reason a valid token fails: retry once with fresh keys, then give up.
+  const refreshed = await fetchJwks(jwksUrl(options.issuer), true);
+  return refreshed ? verifyJwt(token, refreshed, options) : undefined;
 }

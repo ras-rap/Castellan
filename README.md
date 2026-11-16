@@ -709,6 +709,7 @@ journalctl -u castellan -f          # expect "runtime ready" and, if configured,
    WEB_PORT=8080
    WEB_HOST=127.0.0.1            # default; the TLS proxy is the way in
    CLERK_PUBLISHABLE_KEY=pk_test_…
+   CLERK_SECRET_KEY=sk_test_…    # only to read the signed-in user's email (see below)
    WEB_OWNER_EMAILS=you@example.com
    WEB_ADMIN_EMAILS=             # people you hand the same rights
    ```
@@ -724,9 +725,11 @@ journalctl -u castellan -f          # expect "runtime ready" and, if configured,
      "guilds": { "1568699998957211688": ["mod@example.com"] } }
    ```
 
-   Matching is against the Clerk user id (`user_…`) **or** the email claim — the id always works; `email` only
-   works if your Clerk session token includes it (Sessions → session token → add `email`). Emails are
-   lower-cased before comparing.
+   Matching is against the Clerk user id (`user_…`) **or** the account's email. Clerk's default session token
+   carries `sub` and no email, so with `CLERK_SECRET_KEY` set the server reads the address from Clerk's Backend
+   API (`GET /v1/users/{id}`, cached five minutes); without that key, key your lists by `user_…` id instead.
+   Emails are lower-cased before comparing, and a denial says what it matched on — *"matched on user_2xyz /
+   raspberryscrap@gmail.com"* — so a wrong list is obvious rather than silent.
 4. **TLS proxy** — one Caddy block is enough:
 
    ```
