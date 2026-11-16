@@ -131,7 +131,7 @@ writes the entry for you.
 | `bun run typecheck` | `tsc --noEmit` |
 | `bun run lint` / `bun run format` | ESLint (with Prettier) / Prettier |
 | `bun test` | unit tests |
-| `bun run commands deploy\|clear\|list` | slash-command registration (`--global`, `--guild`, `--force`) |
+| `bun run commands deploy\|clear\|list` | slash-command registration: `--all` (every guild the bot is in, the default), `--global`, `--guild`, `--force` |
 | `bun run commands auth\|doctor\|smoke\|e2e\|backup` | agent tooling (`auth` probes Go first then Jev; `backup` writes a consistent SQLite snapshot, keeping 14) |
 
 Fixtures live in `config/fixtures/*.json` and are loaded by `/eval` and the promotion gate.
@@ -752,6 +752,11 @@ and the Discord owner link reads the bot's guild cache, so restart the bot after
   `bun run commands backup` (`VACUUM INTO .data/backups/…`, keeps the last 14) — safer than copying a live DB.
 - The bot never uses the globally installed `opencode`; the pinned 1.19.5 binary comes from `bun install` and
   the boot guard refuses to start on a version mismatch.
+- **Slash commands in every server**: `COMMAND_SCOPE` decides where they are published. The default is `all` —
+  a guild command per server the bot is in, registered at boot and again when the bot joins a new guild, so
+  there is no global-propagation wait and no "it only works in one server". `global` publishes once for every
+  server and `guild` keeps the fast single-guild dev loop. Whichever scope is chosen, the *other* scopes are
+  emptied so the same command never appears twice.
 - Production logs: `logs/app.log` and `logs/error.log` (pino), console output is pretty-printed in development.
 
 ## Troubleshooting

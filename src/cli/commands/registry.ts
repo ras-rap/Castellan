@@ -1,6 +1,7 @@
 import { MetadataStorage } from 'discordx';
 
-export type DeployScope = 'guild' | 'global';
+/** `all` is every guild the bot is in; `guild` is the single development guild. */
+export type DeployScope = 'guild' | 'global' | 'all';
 
 /**
  * Finalises decorated metadata: `@SlashOption` and `@SlashGroup` are applied by `build()`, not by importing

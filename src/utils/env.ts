@@ -21,7 +21,11 @@ export const DISCORD_CLIENT_ID = optional('DISCORD_CLIENT_ID', 'BOT_CLIENT_ID') 
 export const DISCORD_DEVELOPMENT_GUILD_ID = optional('DISCORD_DEVELOPMENT_GUILD_ID', 'REGISTER_GUILD_ID') ?? '';
 export const OWNER_ID = optional('OWNER_ID') ?? '';
 
-/** Development registers to one guild (instant); production registers globally. */
+/**
+ * Where slash commands are published: `guild` (the development guild only), `global`, or `all` (every guild the
+ * bot is in — the default outside development, and the one that keeps a multi-server bot working everywhere).
+ */
+export const COMMAND_SCOPE = optional('COMMAND_SCOPE');
 export const AUTO_REGISTER_COMMANDS = (optional('AUTO_REGISTER_COMMANDS') ?? String(!IS_PRODUCTION)) === 'true';
 
 export const BRIDGE_PORT = Number(optional('BRIDGE_PORT') ?? 7071);

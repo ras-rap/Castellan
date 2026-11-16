@@ -8,9 +8,11 @@ const SUBCOMMANDS = ['setup', 'deploy', 'clear', 'list', 'auth', 'doctor', 'smok
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const printUsage = () => {
-  logger.info('Usage: bun run commands <subcommand> [--global|--guild] [--force]');
+  logger.info('Usage: bun run commands <subcommand> [--global|--guild|--all] [--force]');
   logger.info('  setup    interactive: validate the token, choose a provider, write .env, deploy commands');
-  logger.info('  deploy   publish slash commands (default: guild in development, global in production)');
+  logger.info(
+    '  deploy   publish slash commands (default: dev guild in development, every guild the bot is in otherwise)',
+  );
   logger.info('  clear    remove registered commands from the resolved scope');
   logger.info('  list     diff local commands against the registered ones');
   logger.info('  auth     store the OpenCode credential that Jev accepts');
@@ -29,14 +31,23 @@ if (!subcommand || !(SUBCOMMANDS as readonly string[]).includes(subcommand)) {
   process.exit(subcommand ? 1 : 0);
 }
 
-const hasFlag = (flag: '--global' | '--guild' | '--force') => args.includes(flag);
+type Flags = '--global' | '--guild' | '--all' | '--force';
+const hasFlag = (flag: Flags) => args.includes(flag);
+const SCOPE_FLAGS: Flags[] = ['--global', '--guild', '--all'];
 
-if (hasFlag('--global') && hasFlag('--guild')) {
-  logger.error('cannot specify both --global and --guild');
+const scopeFlags = SCOPE_FLAGS.filter(hasFlag);
+if (scopeFlags.length > 1) {
+  logger.error(`pick one scope: ${scopeFlags.join(', ')}`);
   process.exit(1);
 }
 
-const scope: DeployScope | undefined = hasFlag('--global') ? 'global' : hasFlag('--guild') ? 'guild' : undefined;
+const scope: DeployScope | undefined = hasFlag('--global')
+  ? 'global'
+  : hasFlag('--guild')
+    ? 'guild'
+    : hasFlag('--all')
+      ? 'all'
+      : undefined;
 const force = hasFlag('--force');
 
 const run = async (name: Subcommand) => {
