@@ -1,4 +1,4 @@
-# open-discord-agent — design plan (v2)
+# Castellan (formerly open-discord-agent) — design plan (v2)
 
 Discord-native coding agent on the opencode SDK, with permissioned action in Discord, tool access to code
 and to Discord itself, and self-evolving memory.
