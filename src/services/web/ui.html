@@ -257,6 +257,7 @@
               <button id="tab-extensions" role="tab">Extensions</button>
               <button id="tab-access" role="tab">Access</button>
               <button id="tab-conversations" role="tab">Conversations</button>
+              <button id="tab-secrets" role="tab">Secrets</button>
             </div>
 
             <div id="pending" class="pending hidden">
@@ -289,6 +290,18 @@
                   <div id="transcript" class="card"><div class="empty">pick a session</div></div>
                 </section>
               </div>
+            </div>
+
+            <div id="pane-secrets" class="hidden">
+              <section>
+                <h3>This server’s credentials</h3>
+                <div id="secrets" class="card"></div>
+                <p class="muted" style="font-size: 12px; margin-top: 10px">
+                  Stored sealed (AES-256-GCM) on the bot’s disk, never shown again after saving and never sent to
+                  the agent. A value saved here is used instead of the deployment’s
+                  <span class="mono">.env</span> for this server only.
+                </p>
+              </section>
             </div>
 
             <div id="pane-access" class="hidden">
@@ -488,13 +501,14 @@
       }
 
       function selectTab(tab) {
-        for (const name of ['settings', 'extensions', 'access', 'conversations']) {
+        for (const name of ['settings', 'extensions', 'access', 'conversations', 'secrets']) {
           $(`tab-${name}`).setAttribute('aria-current', String(name === tab));
           $(`pane-${name}`).classList.toggle('hidden', name !== tab);
         }
         if (tab === 'conversations') void loadSessions();
+        if (tab === 'secrets') void loadSecrets();
       }
-      for (const name of ['settings', 'extensions', 'access', 'conversations'])
+      for (const name of ['settings', 'extensions', 'access', 'conversations', 'secrets'])
         $(`tab-${name}`).onclick = () => selectTab(name);
 
       /** Unsaved edits, by setting path → the raw string the API expects. One row saves while others stay dirty. */
@@ -656,6 +670,113 @@
       }
 
       /** The guild's conversations: a list on the left, one transcript on the right. Read-only. */
+      /** Write-only credential rows: the API never returns a value, so an input here is always empty until typed. */
+      async function loadSecrets() {
+        const host = $('secrets');
+        host.replaceChildren();
+        let body;
+        try {
+          body = await api(`/api/guilds/${active}/secrets`);
+        } catch (error) {
+          host.innerHTML = `<div class="empty">${error.message ?? error}</div>`;
+          return;
+        }
+        const table = document.createElement('table');
+        table.innerHTML = '<thead><tr><th>credential</th><th>status</th><th>value</th><th></th></tr></thead>';
+        const tbody = document.createElement('tbody');
+
+        for (const secret of body.secrets ?? []) {
+          const tr = document.createElement('tr');
+
+          const key = document.createElement('td');
+          key.className = 'key';
+          key.textContent = secret.label;
+          const sub = document.createElement('div');
+          sub.className = 'muted';
+          sub.style.fontSize = '12px';
+          sub.textContent = secret.usedBy;
+          key.append(sub);
+
+          const status = document.createElement('td');
+          const pill = document.createElement('span');
+          pill.className = 'pill';
+          pill.textContent =
+            secret.source === 'guild' ? `this server ${secret.hint}` : secret.source === 'env' ? 'deployment .env' : 'not set';
+          if (secret.source === 'none') pill.classList.add('warn');
+          status.append(pill);
+          if (secret.updatedAt) {
+            const when = document.createElement('div');
+            when.className = 'muted';
+            when.style.fontSize = '12px';
+            when.textContent = `${new Date(secret.updatedAt).toLocaleString()} · ${secret.updatedBy ?? ''}`;
+            status.append(when);
+          }
+
+          const valueCell = document.createElement('td');
+          const input = document.createElement('input');
+          input.type = 'password';
+          input.autocomplete = 'off';
+          input.placeholder = secret.source === 'guild' ? 'replace the stored value' : 'paste it here';
+          input.disabled = !(body.canEdit?.allowed ?? false);
+          valueCell.append(input);
+
+          const actions = document.createElement('td');
+          actions.className = 'row-actions';
+          const save = document.createElement('button');
+          save.className = 'primary';
+          save.textContent = 'save';
+          save.disabled = !(body.canEdit?.allowed ?? false);
+          const clear = document.createElement('button');
+          clear.className = 'ghost';
+          clear.textContent = 'clear';
+          clear.disabled = !(body.canEdit?.allowed ?? false) || secret.source !== 'guild';
+
+          const note = document.createElement('span');
+          note.className = 'muted';
+          note.style.fontSize = '12px';
+
+          save.onclick = async () => {
+            if (input.value.trim().length === 0) return;
+            save.disabled = true;
+            try {
+              const done = await api(`/api/guilds/${active}/secrets/${encodeURIComponent(secret.name)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ value: input.value }),
+              });
+              input.value = '';
+              note.textContent = `saved ${done.hint}`;
+              await loadSecrets();
+            } catch (error) {
+              note.textContent = String(error.message ?? error);
+              save.disabled = false;
+            }
+          };
+          clear.onclick = async () => {
+            clear.disabled = true;
+            try {
+              await api(`/api/guilds/${active}/secrets/${encodeURIComponent(secret.name)}`, { method: 'DELETE' });
+              await loadSecrets();
+            } catch (error) {
+              note.textContent = String(error.message ?? error);
+              clear.disabled = false;
+            }
+          };
+
+          actions.append(save, clear, note);
+          tr.append(key, status, valueCell, actions);
+          tbody.append(tr);
+        }
+
+        table.append(tbody);
+        host.replaceChildren(table);
+        if (!(body.canEdit?.allowed ?? false)) {
+          const why = document.createElement('div');
+          why.className = 'empty';
+          why.textContent = body.canEdit?.reason ?? 'read-only for this account';
+          host.prepend(why);
+        }
+      }
+
       async function loadSessions() {
         const host = $('sessions');
         host.replaceChildren();

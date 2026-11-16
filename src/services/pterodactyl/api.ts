@@ -1,4 +1,5 @@
 import { config } from '@services/config.ts';
+import { resolveSecret } from '@services/secrets/store.ts';
 import { PTERO_ADMIN_KEY, PTERO_BASE_URL, PTERO_CLIENT_KEY } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 
@@ -19,15 +20,15 @@ export type PteroTarget = {
 };
 
 /**
- * The guild's panel settings resolved against the deployment's keys. `undefined` means "not configured", and
- * every caller treats that as the feature being off rather than as an error.
+ * The guild's panel settings, with the keys this server stored (dashboard → Secrets) or the deployment's
+ * `PTERO_*`. `undefined` means "not configured", and every caller treats that as the feature being off.
  */
 export function resolvePtero(guildId: string): PteroTarget | undefined {
   const settings = config.pterodactyl(guildId);
   const rawBase = settings.baseUrl.length > 0 ? settings.baseUrl : (PTERO_BASE_URL ?? '');
   const baseUrl = rawBase.replace(/\/+$/, '');
-  const clientKey = PTERO_CLIENT_KEY;
-  const adminKey = PTERO_ADMIN_KEY;
+  const clientKey = resolveSecret(guildId, 'pterodactyl.clientKey', PTERO_CLIENT_KEY);
+  const adminKey = resolveSecret(guildId, 'pterodactyl.adminKey', PTERO_ADMIN_KEY);
   if (!settings.enabled || baseUrl.length === 0) return undefined;
   // A client key is the floor: without it there is nothing to talk to.
   if (!clientKey && !adminKey) return undefined;

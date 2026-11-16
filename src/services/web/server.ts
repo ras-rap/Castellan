@@ -2,13 +2,23 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { config } from '@services/config.ts';
+import { db } from '@services/database/sqlite.ts';
 import { services } from '@services/discord/services.ts';
 import { extensionStatus } from '@services/extensions/registry.ts';
 import { protectedAccessWrite } from '@services/policy/access.ts';
 import { readSetting } from '@services/policy/dotted.ts';
 import { applySetting } from '@services/policy/panel.ts';
 import { SETTINGS, describeSetting, domainOf } from '@services/policy/settings.ts';
-import { CLERK_PUBLISHABLE_KEY, OWNER_ID, WEB_HOST, WEB_PORT } from '@utils/env.ts';
+import { SECRET_SPECS, clearSecret, listSecrets, setSecret } from '@services/secrets/store.ts';
+import {
+  CLERK_PUBLISHABLE_KEY,
+  GIT_TOKEN,
+  OWNER_ID,
+  PTERO_ADMIN_KEY,
+  PTERO_CLIENT_KEY,
+  WEB_HOST,
+  WEB_PORT,
+} from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 
 import { authenticate, issuerFromPublishableKey } from './auth.ts';
@@ -189,6 +199,70 @@ export function startWeb(input: {
         const sessionId = sessionMatch[2];
         if (!sessionId) return json({ 'sessions': listSessions(guildId) });
         return json(await readTranscript(guildId, decodeURIComponent(sessionId)));
+      }
+
+      // per-server credentials: the guild's own panel/forge keys instead of the deployment's `.env`
+      const secretMatch = /^\/api\/guilds\/(\d+)\/secrets(?:\/([^/]+))?$/.exec(url.pathname);
+      if (secretMatch) {
+        const guildId = secretMatch[1] ?? '';
+        if (!visible.includes(guildId))
+          return json({ 'error': 'forbidden', 'detail': 'this account does not manage that server' }, 403);
+        // A server owner manages their own server's credentials, exactly like its access list.
+        const verdict = canManageAccess(principal, guildId, guildEnabled(guildId));
+        const name = secretMatch[2] === undefined ? undefined : decodeURIComponent(secretMatch[2]);
+
+        if (method === 'GET' && name === undefined) {
+          if (!verdict.allowed) return json({ 'error': 'forbidden', 'detail': verdict.reason }, 403);
+          return json({
+            'secrets': listSecrets(guildId, {
+              'PTERO_CLIENT_KEY': PTERO_CLIENT_KEY ?? '',
+              'PTERO_ADMIN_KEY': PTERO_ADMIN_KEY ?? '',
+              'GIT_TOKEN': GIT_TOKEN ?? '',
+            }),
+            'canEdit': verdict,
+            'known': SECRET_SPECS.map(spec => spec.name),
+          });
+        }
+
+        if (name !== undefined && (method === 'PUT' || method === 'DELETE')) {
+          if (!verdict.allowed) return json({ 'error': 'forbidden', 'detail': verdict.reason }, 403);
+          const actor = `web:${principal.email ?? principal.clerkId} (${principal.kind})`;
+          const record = (outcome: string) =>
+            db
+              .query(
+                'INSERT INTO audit (ts, guild_id, actor_id, channel_id, tool, args, verdict, layer, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              )
+              .run(
+                Date.now(),
+                guildId,
+                principal.clerkId,
+                null,
+                method === 'PUT' ? 'secret_set' : 'secret_clear',
+                // the value never reaches the audit table, only the fact that this name changed
+                JSON.stringify({ name, 'by': actor }),
+                'allow',
+                'web',
+                outcome,
+              );
+
+          if (method === 'DELETE') {
+            const removed = clearSecret(guildId, name);
+            record(removed ? 'cleared' : 'nothing to clear');
+            return json({ 'ok': true, 'removed': removed });
+          }
+
+          const body = (await request.json().catch(() => undefined)) as { value?: unknown } | undefined;
+          const value = typeof body?.value === 'string' ? body.value : '';
+          const stored = setSecret({ guildId, name, value, 'by': actor });
+          if (!stored.ok) {
+            record(`rejected: ${stored.error}`);
+            return json({ 'error': 'rejected', 'detail': stored.error }, 400);
+          }
+          record(`stored ${stored.hint}`);
+          return json({ 'ok': true, 'hint': stored.hint });
+        }
+
+        return json({ 'error': 'method not allowed' }, 405);
       }
 
       const guildMatch = /^\/api\/guilds\/(\d+)(\/access)?$/.exec(url.pathname);

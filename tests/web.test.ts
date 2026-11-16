@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { config } from '@services/config.ts';
-import { sessions } from '@services/database/sqlite.ts';
+import { db, sessions } from '@services/database/sqlite.ts';
 import { services } from '@services/discord/services.ts';
 import { authenticate, clearJwksCache, issuerFromPublishableKey, verifyJwt, type Jwks } from '@services/web/auth.ts';
 import {
@@ -363,6 +363,85 @@ describe('the dashboard over http', () => {
         ).status,
       ).toBe(403);
     } finally {
+      remove();
+      server.stop(true);
+    }
+  });
+
+  test('secrets: the server stores its own key, reads back only a hint, and the value reaches no response', async () => {
+    const remove = withWebConfig({
+      'owners': ['boss@example.com'],
+      'admins': [],
+      'links': { 'user_discord_owner': 'discord-owner-id' },
+      'guilds': {},
+    });
+    const { server, call, tokens } = await boot();
+    const wipe = () => {
+      db.query("DELETE FROM guild_secrets WHERE guild_id = '111'").run();
+      db.query("DELETE FROM audit WHERE guild_id = '111' AND tool LIKE 'secret_%'").run();
+    };
+    // the suite shares one database: start from a known audit trail for this guild
+    wipe();
+    try {
+      const before = await call('/api/guilds/111/secrets', {}, tokens.guild);
+      expect(before.status).toBe(200);
+      const names = (before.body.secrets as Array<{ name: string; source: string }>).map(s => s.name);
+      expect(names).toContain('pterodactyl.clientKey');
+      // nothing stored yet for this server: whatever the deployment's .env holds is the only possible source
+      expect(
+        (before.body.secrets as Array<{ name: string; source: string }>).find(s => s.name === 'pterodactyl.clientKey')
+          ?.source,
+      ).not.toBe('guild');
+
+      const key = 'ptlc_abcdefgh12345678xyz';
+      const stored = await call(
+        '/api/guilds/111/secrets/pterodactyl.clientKey',
+        { 'method': 'PUT', 'body': JSON.stringify({ 'value': key }) },
+        tokens.guild,
+      );
+      expect(stored.status).toBe(200);
+      expect(stored.body.hint).toBe('••••8xyz');
+
+      const after = await call('/api/guilds/111/secrets', {}, tokens.guild);
+      // the value is nowhere in the response, not even the part of it the panel would reuse
+      expect(JSON.stringify(after.body)).not.toContain(key);
+      expect(JSON.stringify(after.body)).not.toContain('abcdefgh');
+      const row = (after.body.secrets as Array<{ name: string; source: string; hint: string }>).find(
+        s => s.name === 'pterodactyl.clientKey',
+      );
+      expect(row?.source).toBe('guild');
+      expect(row?.hint).toBe('••••8xyz');
+
+      // a bad key is refused with the reason, and it is not stored
+      const rejected = await call(
+        '/api/guilds/111/secrets/git.token',
+        { 'method': 'PUT', 'body': JSON.stringify({ 'value': 'short' }) },
+        tokens.guild,
+      );
+      expect(rejected.status).toBe(400);
+      expect(String(rejected.body.detail)).toContain('must be at least 16 characters');
+
+      // another server's owner cannot touch it
+      expect((await call('/api/guilds/222/secrets', {}, tokens.guild)).status).toBe(403);
+
+      const cleared = await call('/api/guilds/111/secrets/pterodactyl.clientKey', { 'method': 'DELETE' }, tokens.guild);
+      expect(cleared.body.removed).toBe(true);
+      const gone = await call('/api/guilds/111/secrets', {}, tokens.guild);
+      expect(
+        (gone.body.secrets as Array<{ name: string; source: string }>).find(s => s.name === 'pterodactyl.clientKey')
+          ?.source,
+      ).not.toBe('guild');
+
+      // and both changes are in the audit trail, by name only
+      const audited = db
+        .query<{ tool: string; args: string }, [string]>(
+          "SELECT tool, args FROM audit WHERE guild_id = '111' AND tool LIKE 'secret_%' ORDER BY ts",
+        )
+        .all('111');
+      expect(audited.map(row => row.tool)).toEqual(['secret_set', 'secret_set', 'secret_clear']);
+      expect(JSON.stringify(audited)).not.toContain(key);
+    } finally {
+      wipe();
       remove();
       server.stop(true);
     }

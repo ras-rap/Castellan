@@ -1,4 +1,5 @@
 import { config } from '@services/config.ts';
+import { resolveSecret } from '@services/secrets/store.ts';
 import { GIT_BASE_URL, GIT_OWNER, GIT_TOKEN } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 
@@ -6,7 +7,7 @@ const logger = log('git/forge');
 
 export type ForgeProvider = 'gitea' | 'forgejo' | 'gitlab';
 
-/** Everything needed to talk to a hosted git server. The token only ever comes from `.env`. */
+/** Everything needed to talk to a hosted git server. The token is this server's own, or the deployment's. */
 export type ForgeTarget = {
   provider: ForgeProvider;
   /** Scheme and host, no trailing slash: `https://git.example.com`. */
@@ -20,13 +21,13 @@ export type ForgeTarget = {
 export type ForgeRepo = { name: string; cloneUrl: string; htmlUrl: string };
 
 /**
- * The guild's git settings resolved against the deployment's credentials. `undefined` means "not configured",
- * and every caller treats that as "the feature is off" rather than as an error.
+ * The guild's git settings, with the token this server stored (dashboard → Secrets) or the deployment's
+ * `GIT_TOKEN`. `undefined` means "not configured", and every caller treats that as "the feature is off".
  */
 export function resolveForge(guildId: string): ForgeTarget | undefined {
   const git = config.git(guildId);
   const baseUrl = (git.baseUrl.length > 0 ? git.baseUrl : (GIT_BASE_URL ?? '')).replace(/\/+$/, '');
-  const token = GIT_TOKEN ?? '';
+  const token = resolveSecret(guildId, 'git.token', GIT_TOKEN) ?? '';
   if (!git.enabled || baseUrl.length === 0 || token.length === 0) return undefined;
   return {
     'provider': git.provider,

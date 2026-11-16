@@ -130,8 +130,8 @@ const FeatureSchema = z
   .default({});
 
 /**
- * Optional hosted git server. Credentials never live here: the token comes from `.env` (`GIT_TOKEN`), this only
- * says whether the guild may use it and what it may do with it.
+ * Optional hosted git server. The token is a per-server secret (dashboard → Secrets, sealed in the database),
+ * falling back to `.env`; this only says whether the guild may use it and what it may do with it.
  */
 const GitSchema = z
   .object({
@@ -150,8 +150,9 @@ const GitSchema = z
   .default({});
 
 /**
- * Optional Pterodactyl panel. Keys live in `.env` (`PTERO_CLIENT_KEY` / `PTERO_ADMIN_KEY`); this says whether the
- * guild may use them, which servers it may touch, and whether the file and admin tools exist at all.
+ * Optional Pterodactyl panel. The keys are per-server secrets (dashboard → Secrets, sealed in the database),
+ * falling back to `.env` (`PTERO_CLIENT_KEY` / `PTERO_ADMIN_KEY`); this says whether the guild may use them,
+ * which servers it may touch, and whether the file and admin tools exist at all.
  */
 const PterodactylSchema = z
   .object({

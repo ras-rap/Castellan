@@ -70,12 +70,16 @@ export class Supervisor {
     ensureGuardPlugin();
     const port = await freePort();
     const password = crypto.randomUUID().replaceAll('-', '');
+    // The agent server gets no panel or forge credential: those are bot-process secrets now (per guild, sealed in
+    // the database), and nothing the model can call needs them — the tools run here, behind the bridge.
+    const inherited = { ...Bun.env };
+    for (const name of ['PTERO_CLIENT_KEY', 'PTERO_ADMIN_KEY', 'PTERO_BASE_URL', 'GIT_TOKEN']) delete inherited[name];
     const proc = Bun.spawn([this.binary, 'serve', '--hostname', config.opencode.host, '--port', String(port)], {
       'cwd': workspace.dir,
       'stdout': 'inherit',
       'stderr': 'pipe',
       'env': {
-        ...Bun.env,
+        ...inherited,
         'XDG_DATA_HOME': resolve(paths.data, 'opencode/data'),
         // Bot-owned config dir: it holds the host-shell guard plugin, and nothing else of the owner's leaks in.
         'XDG_CONFIG_HOME': configHome(),

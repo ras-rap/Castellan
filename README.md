@@ -731,10 +731,31 @@ WEB_ADMIN_EMAILS=                     # "certain people given perms", same right
 | **server owner** (Discord owner of an **approved** server, via `links`, or listed in `guilds`) | their servers | that server's guild-scoped settings and its per-account access |
 | **anyone else** | nothing | nothing (the API answers 403, the page shows nothing) |
 
-Bot-wide means the machine and the credentials, so a server owner cannot touch them: `shell.*` (docker vs host),
+Bot-wide means the machine and the models, so a server owner cannot touch them: `shell.*` (docker vs host),
 `model.*`, `git.*`, `pterodactyl.*`, `roles.*`, `enabled` (that is the *approval* flag — an unapproved server's
 owner gets nothing) and `policy.tools.allow` (which skips every approval card). Everything else — `features.*`,
 `policy.mode`, `policy.vibe.*`, `policy.review.*`, `policy.matrix.*`, `access.*` — is theirs, on their server only.
+
+### Per-server credentials
+
+The panel and forge keys used to be one `.env` for the whole bot. Every server can now hold its own, in the
+dashboard's **Secrets** tab:
+
+| credential | used by | fallback |
+|---|---|---|
+| `pterodactyl.clientKey` | the `ptero_*` tools | `PTERO_CLIENT_KEY` |
+| `pterodactyl.adminKey` | the `ptero_admin_*` tools | `PTERO_ADMIN_KEY` |
+| `git.token` | `git_push`, `git_repo_create` | `GIT_TOKEN` |
+
+A value saved for a server is used instead of the deployment's, per server, with no restart. What the dashboard
+gets back is a status and the last four characters — never the value, not even on the write that set it. The
+store seals each credential with AES-256-GCM before it touches SQLite (`services/secrets/store.ts`), keyed by
+`SECRETS_KEY` or a generated `.data/secrets.key` (0600): a copy of `agent.db` alone is useless, and losing the
+key means re-entering every credential. Every change is in `/audit` by name only.
+
+A server owner manages their own server's credentials — the same rule as its access list. Bot-wide settings stay
+bot-wide (`git.enabled`, `pterodactyl.servers`, …): a server owner may attach a key, not grant themselves the
+panel.
 
 How it is built:
 
@@ -742,12 +763,16 @@ How it is built:
   JWKS, issuer + `exp`/`nbf` checked, one retry on key rotation). No key, no session: `undefined` and a 401.
 - `services/web/principals.ts` — `config/web.json` → `owner | admin | guild | nobody`, plus the bot-wide rule.
 - `services/web/server.ts` — `GET /api/me`, `GET /api/guilds/:id`, `PATCH /api/guilds/:id`,
-  `GET|PUT /api/guilds/:id/access`; every request re-verifies the token and every write goes through the same
-  `applySetting` the Discord commands use, with `actor: web:<email>` in the log.
-- `services/web/ui.html` — one page, no build step: sidebar of servers, four tabs per server, settings grouped by
+  `GET|PUT /api/guilds/:id/access`, `GET /api/guilds/:id/secrets`, `PUT|DELETE /api/guilds/:id/secrets/:name`;
+  every request re-verifies the token and every settings write goes through the same `applySetting` the Discord
+  commands use, with `actor: web:<email>` in the log.
+- `services/secrets/store.ts` — the per-server credential store: shape-validated (`ptlc_…`, `ptla_…`), sealed,
+  write-only, with `resolveSecret()` as the one precedence rule (server's own, else `.env`).
+- `services/web/ui.html` — one page, no build step: sidebar of servers, five tabs per server, settings grouped by
   category with the control that matches the value type, bot-wide rows disabled with the reason, a JSON box for
   per-account access profiles, and **Conversations** — the guild's sessions with a readable transcript (user,
-  assistant, one line per tool call; the model's reasoning is not shown).
+  assistant, one line per tool call; the model's reasoning is not shown) — and **Secrets**, the credential rows
+  above with a save/clear per row and a pill saying where each value currently comes from.
 - Edits accumulate: change any number of rows and press **save all** (or save one row on its own), the bar counts
   what is unsaved, and a Clerk token refresh no longer re-navigates or reloads anything — it only refreshes the
   token.

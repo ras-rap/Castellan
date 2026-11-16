@@ -26,6 +26,18 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 );
 CREATE INDEX IF NOT EXISTS chat_sessions_by_session ON chat_sessions(session_id);
 
+-- Per-server credentials, sealed with AES-256-GCM before they reach this table (see services/secrets/store.ts):
+-- the DB alone must not be enough to use a panel or a forge.
+CREATE TABLE IF NOT EXISTS guild_secrets (
+  guild_id   TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  sealed     TEXT NOT NULL,
+  hint       TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT NOT NULL,
+  PRIMARY KEY (guild_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS approvals (
   id         TEXT PRIMARY KEY,
   kind       TEXT NOT NULL,
