@@ -1,7 +1,7 @@
 import { accessGuard, guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
 import { effectiveModel } from '@services/agent/models.ts';
-import { TOOL_SETS } from '@services/bridge/capabilities.ts';
 import { RANK_NAMES, config, isOwner, type GuildPolicy } from '@services/config.ts';
+import { TOOL_SETS } from '@services/extensions/registry.ts';
 import { ceilingFor, tierOf } from '@services/policy/hard.ts';
 import { jevMode } from '@services/policy/jev.ts';
 import { applySetting } from '@services/policy/panel.ts';

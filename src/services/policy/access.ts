@@ -1,5 +1,5 @@
-import { capabilityNames, toolSetNames } from '@services/bridge/capabilities.ts';
 import { RANK_NAMES, RISK_NAMES, config } from '@services/config.ts';
+import { capabilityNames, toolSetNames } from '@services/extensions/registry.ts';
 import { MetadataStorage } from 'discordx';
 
 export type AccessCheck = { allowed: boolean; reason: string };

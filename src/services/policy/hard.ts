@@ -1,4 +1,3 @@
-import { toolListed, type Capability, type Risk } from '@services/bridge/capabilities.ts';
 import {
   RANK_NAMES,
   config,
@@ -8,7 +7,9 @@ import {
   type GuildPterodactyl,
   type UserAccess,
 } from '@services/config.ts';
+import { toolListed } from '@services/extensions/registry.ts';
 
+import type { Capability, Risk } from '@services/extensions/protocol.ts';
 import type { GuildMember } from 'discord.js';
 
 export type Tier = 0 | 1 | 2 | 3 | 4;
@@ -164,12 +165,10 @@ const PTERO_SERVER_TOOLS = [
   'ptero_admin_server',
   'ptero_admin_suspend',
 ];
-const PTERO_FILE_TOOLS = ['ptero_files', 'ptero_file_read', 'ptero_file_write'];
 
 /**
- * Panel rules, all deterministic. The guild's switches decide whether the tools exist at all; this is what makes
- * that true even for a client that still has an older tool list, and the allow-list is what keeps "one server"
- * meaning one server instead of "whatever the API key can reach".
+ * Panel allow-list rule. Whether the extension exists at all is the registry's answer (`available`), so this only
+ * keeps "one server" meaning one server instead of "whatever the API key can reach".
  */
 function pterodactylRule(
   capability: Capability,
@@ -177,14 +176,8 @@ function pterodactylRule(
   settings: { enabled: boolean; admin: boolean; files: boolean; servers: string[] } | undefined,
 ): HardDecision | undefined {
   if (!capability.name.startsWith('ptero_')) return undefined;
-  if (!settings?.enabled)
-    return { 'verdict': 'deny', 'layer': 'tools', 'reason': 'pterodactyl is not enabled in this server' };
-  if (capability.name.startsWith('ptero_admin_') && !settings.admin)
-    return { 'verdict': 'deny', 'layer': 'tools', 'reason': 'the panel admin tools are switched off here' };
-  if (PTERO_FILE_TOOLS.includes(capability.name) && !settings.files)
-    return { 'verdict': 'deny', 'layer': 'tools', 'reason': 'the panel file tools are switched off here' };
-
   if (!PTERO_SERVER_TOOLS.includes(capability.name)) return undefined;
+  if (!settings) return undefined;
   const server = typeof args.server === 'string' ? args.server : typeof args.id === 'string' ? args.id : '';
   if (server.length === 0) return undefined;
   if (settings.servers.length === 0) return undefined;
@@ -202,11 +195,16 @@ function pterodactylRule(
  * Administrator "to fix permissions" — so they are refused in code, not in prose.
  */
 function argumentRule(
+  input: HardInput,
   capability: Capability,
   args: Record<string, unknown>,
   protectedIds: readonly string[],
   pterodactyl: HardInput['pterodactyl'],
 ): HardDecision | undefined {
+  // An extension the guild switched off, or never configured, is refused before its arguments matter.
+  const availability = input.available?.(capability.name);
+  if (availability && !availability.ok) return { 'verdict': 'deny', 'layer': 'tools', 'reason': availability.reason };
+
   const panel = pterodactylRule(capability, args, pterodactyl);
   if (panel) return panel;
 
@@ -250,6 +248,11 @@ export type HardInput = {
   protectedIds?: readonly string[];
   /** This guild's panel switches, so a stale client cannot use a tool the guild has since switched off. */
   pterodactyl?: GuildPterodactyl;
+  /**
+   * Per-guild extension availability: switched off here, or not configured here. Answered by the registry, so a
+   * disabled extension is refused in code and not merely absent from the model's tool list.
+   */
+  available?: (name: string) => { ok: boolean; reason: string };
 };
 
 /**
@@ -293,7 +296,7 @@ export function hardCheck(input: HardInput): HardDecision {
 
   // Argument rules sit between the lists and the allow-list on purpose: an owner who allow-lists `bash` for
   // everyone did not thereby allow `rm -rf /`.
-  const argument = argumentRule(capability, args, input.protectedIds ?? [], input.pterodactyl);
+  const argument = argumentRule(input, capability, args, input.protectedIds ?? [], input.pterodactyl);
   if (argument) return argument;
 
   if (policy.tools.allow.includes(capability.name))

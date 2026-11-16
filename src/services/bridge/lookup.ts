@@ -1,4 +1,6 @@
-import { capabilities, type Capability } from './capabilities.ts';
+import { capabilities } from '@services/extensions/registry.ts';
+
+import type { Capability } from '@services/extensions/protocol.ts';
 
 const table: Record<string, Capability> = Object.fromEntries(
   capabilities.map(capability => [capability.name, capability]),

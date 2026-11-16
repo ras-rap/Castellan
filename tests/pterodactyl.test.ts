@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 
 import { capabilityByName } from '@services/bridge/lookup.ts';
 import { config } from '@services/config.ts';
+import { capabilityAvailability } from '@services/extensions/registry.ts';
 import { hardCheck } from '@services/policy/hard.ts';
 import {
   POWER_SIGNALS,
@@ -61,6 +62,7 @@ const gate = (guildId: string, tool: string, args: Record<string, unknown> = {})
     'policy': config.policy(guildId),
     'features': config.features(guildId),
     'pterodactyl': config.pterodactyl(guildId),
+    'available': (name: string) => capabilityAvailability(guildId, name),
   });
 
 describe('panel requests', () => {

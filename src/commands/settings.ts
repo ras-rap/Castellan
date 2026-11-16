@@ -2,7 +2,7 @@ import { accessGuard, guildEnabled, guildOnly } from '@guards/index.ts';
 import { RANK_NAMES, RISK_NAMES, config, guildDefaults } from '@services/config.ts';
 import { ceilingFor } from '@services/policy/hard.ts';
 import { MATRIX_PATH, applySetting, categoriesFor, entriesFor, scopeNote } from '@services/policy/panel.ts';
-import { describeSetting, domainOf, settingByPath } from '@services/policy/settings.ts';
+import { describeSetting, domainOf, readSetting, settingByPath } from '@services/policy/settings.ts';
 import { BRAND_COLOR, EPHEMERAL } from '@utils/constants.ts';
 import { log } from '@utils/logger.ts';
 import {
@@ -31,6 +31,12 @@ export type View = { embeds: EmbedBuilder[]; components: Row[] };
 
 const currentSettings = (guildId: string) => config.guild(guildId) ?? guildDefaults();
 const currentValue = (guildId: string, path: string): string => describeSetting(currentSettings(guildId), path);
+
+/** Lists arrive as `string[] | undefined`; the panel only needs to know which boxes are ticked. */
+const listAt = (guildId: string, path: string): string[] => {
+  const value = readSetting(currentSettings(guildId), path);
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+};
 
 const button = (id: string, label: string, style: ButtonStyle = ButtonStyle.Secondary, disabled = false) =>
   new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style).setDisabled(disabled);
@@ -129,7 +135,20 @@ export function settingView(userId: string, guildId: string, path: string): View
     'components': [backRow(category)],
   };
 
-  if (domain?.kind === 'choice' && domain.choices) {
+  if (domain?.kind === 'multi' && domain.choices) {
+    const selected = new Set(listAt(guildId, path));
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(`oda:set:multi:${path}`)
+      .setPlaceholder('nothing selected = everything on')
+      .setMinValues(0)
+      .setMaxValues(Math.min(domain.choices.length, 25))
+      .addOptions(
+        domain.choices
+          .slice(0, 25)
+          .map(choice => ({ 'label': choice, 'value': choice, 'default': selected.has(choice) })),
+      );
+    result.components.unshift(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu));
+  } else if (domain?.kind === 'choice' && domain.choices) {
     const select = new StringSelectMenuBuilder()
       .setCustomId(`oda:set:val:${path}`)
       .setPlaceholder('pick a value')
@@ -158,7 +177,7 @@ export function settingView(userId: string, guildId: string, path: string): View
     result.embeds[0]?.setFooter({ 'text': domain?.placeholder ?? 'free text' });
   }
 
-  if (domain?.kind === 'choice' || domain?.kind === 'boolean')
+  if (domain?.kind === 'choice' || domain?.kind === 'boolean' || domain?.kind === 'multi')
     result.components.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(button(`oda:set:reset:${path}`, 'reset to default')),
     );
@@ -291,6 +310,12 @@ export class SettingsCommand {
     await interaction.update(
       settingView(interaction.user.id, interaction.guildId ?? '', `${MATRIX_PATH}.${rank}.${risk}`),
     );
+  }
+
+  @SelectMenuComponent({ 'id': /^oda:set:multi:/ })
+  async onMulti(interaction: StringSelectMenuInteraction) {
+    const path = interaction.customId.slice('oda:set:multi:'.length);
+    await commit(interaction, path, [...interaction.values].join(','));
   }
 
   @SelectMenuComponent({ 'id': /^oda:set:val:/ })

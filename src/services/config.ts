@@ -122,6 +122,8 @@ const FeatureSchema = z
         'disabled': z.array(z.string()).default([]),
       })
       .default({}),
+    /** Extensions (tool sets) switched off for this guild: `discord`, `shell`, `git`, `pterodactyl`, … */
+    'extensions': z.object({ 'disabled': z.array(z.string()).default([]) }).default({}),
     /** off = act on the obvious reading; always = never act on an interpretation, ask first. */
     'clarify': z.enum(CLARIFY_LEVELS).default('normal'),
   })

@@ -1,79 +1,17 @@
-import { config } from '@services/config.ts';
-import { createRepo } from '@services/git/forge.ts';
-import { attachOrigin, commitNow, describeWorkspace, pushWorkspace } from '@services/git/workspace.ts';
-import {
-  POWER_SIGNALS,
-  attributesOf,
-  commandRequest,
-  describeServerLine,
-  keyFor,
-  listAttributes,
-  powerRequest,
-  pteroRequest,
-  resolvePtero,
-  safePath,
-  serverAllowed,
-  writeRequest,
-  type PteroTarget,
-} from '@services/pterodactyl/api.ts';
-import { runShell } from '@services/workspace/shell.ts';
 import {
   ChannelType,
   PermissionFlagsBits,
   TextChannel as TextChannelClass,
-  type Client,
   type ColorResolvable,
   type Guild,
   type GuildMember,
   type TextChannel,
 } from 'discord.js';
 
+import { num, requireStr, str, strArray, type Extension, type ExtensionCapability } from './protocol.ts';
+
 type PermissionName = keyof typeof PermissionFlagsBits;
 
-export type Risk = 'read' | 'reversible' | 'destructive' | 'admin';
-
-export type ParamKind = 'string' | 'number' | 'boolean' | 'string[]';
-
-export type ParamSpec = {
-  name: string;
-  kind: ParamKind;
-  description: string;
-  required?: boolean;
-  choices?: string[];
-};
-
-export type CapabilityContext = {
-  client: Client;
-  guild: Guild;
-  actorId: string;
-  channelId?: string;
-};
-
-export type Capability = {
-  name: string;
-  summary: string;
-  description: string;
-  risk: Risk;
-  params: ParamSpec[];
-  run: (ctx: CapabilityContext, args: Record<string, unknown>) => Promise<string>;
-};
-
-const str = (args: Record<string, unknown>, key: string): string | undefined => {
-  const value = args[key];
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-};
-
-const num = (args: Record<string, unknown>, key: string): number | undefined => {
-  const value = args[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-};
-
-const strArray = (args: Record<string, unknown>, key: string): string[] => {
-  const value = args[key];
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-};
-
-/** Permission names are validated against discord.js's flag table, so a typo fails the call instead of no-oping. */
 const permissionNames = (names: string[]): PermissionName[] =>
   names.map(name => {
     if (!(name in PermissionFlagsBits))
@@ -95,63 +33,6 @@ const overwritePayload = (allow: string[], deny: string[]): Partial<Record<Permi
 const hexColor = (value: string): ColorResolvable => {
   if (!/^#[0-9a-f]{6}$/i.test(value)) throw new Error(`"${value}" is not a hex colour like #ff8800`);
   return value as ColorResolvable;
-};
-
-const requireStr = (args: Record<string, unknown>, key: string): string => {
-  const value = str(args, key);
-  if (!value) throw new Error(`missing required argument: ${key}`);
-  return value;
-};
-
-/** Renders one panel field: anything that is not a printable scalar is `?` rather than `[object Object]`. */
-const show = (value: unknown, fallback = '?'): string =>
-  typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : fallback;
-
-/** Nested panel payloads (`attributes.user`, `attributes.resources`) are objects or nothing. */
-const nested = (record: Record<string, unknown>, key: string): Record<string, unknown> => {
-  const value = record[key];
-  if (typeof value !== 'object' || value === null) return {};
-  // `typeof` proves an object; `Object.entries` is the cheapest way to keep the copy shallow-but-honest.
-  return Object.fromEntries(Object.entries(value));
-};
-
-const bytes = (value: unknown): string =>
-  typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value / 1_048_576)}MB` : '?';
-
-const minutes = (value: unknown): string =>
-  typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value / 60_000)}m` : '?';
-
-const pick = <T extends string>(allowed: readonly T[], raw: string, what: string): T => {
-  const value = raw.trim().toLowerCase();
-  const match = allowed.find(entry => entry === value);
-  if (!match) throw new Error(`${what} must be one of ${allowed.join(', ')}`);
-  return match;
-};
-
-const requirePtero = (guildId: string): PteroTarget => {
-  const target = resolvePtero(guildId);
-  if (!target?.clientKey)
-    throw new Error('no pterodactyl panel here (pterodactyl.enabled + PTERO_CLIENT_KEY + PTERO_BASE_URL)');
-  return target;
-};
-
-const requirePteroFiles = (guildId: string): PteroTarget => {
-  const target = requirePtero(guildId);
-  if (!target.files) throw new Error('the panel file tools are switched off here (pterodactyl.files)');
-  return target;
-};
-
-const requirePteroAdmin = (guildId: string): PteroTarget => {
-  const target = resolvePtero(guildId);
-  if (!target?.admin || !target.adminKey)
-    throw new Error('the panel admin tools are not enabled here (pterodactyl.admin + PTERO_ADMIN_KEY)');
-  return target;
-};
-
-/** The guild's `pterodactyl.servers` allow-list, enforced before any request leaves the bot. */
-const requirePteroServer = (target: PteroTarget, server: string): string => {
-  if (!serverAllowed(target, server)) throw new Error(`${server} is not in this server's pterodactyl allow-list`);
-  return server;
 };
 
 /**
@@ -199,7 +80,36 @@ const channelLine = (channel: {
   (channel.parentId ? `  parent=${channel.parentId}` : '') +
   (channel.position === undefined ? '' : `  pos=${channel.position}`);
 
-export const capabilities: Capability[] = [
+/** The finer sets inside the Discord surface: `features.tools.disabled: ["channels"]` and per-account lists. */
+const AREAS: Record<string, string[]> = {
+  'guild_info': ['server'],
+  'channels_list': ['channels'],
+  'channel_info': ['channels'],
+  'channel_create': ['channels'],
+  'channel_update': ['channels'],
+  'channel_move': ['channels'],
+  'channel_delete': ['channels'],
+  'roles_list': ['roles'],
+  'role_assign': ['roles'],
+  'role_create': ['roles'],
+  'role_update': ['roles'],
+  'role_delete': ['roles'],
+  'member_list': ['members'],
+  'member_info': ['members'],
+  'member_timeout': ['members'],
+  'member_kick': ['members'],
+  'member_ban': ['members'],
+  'messages_fetch': ['messages'],
+  'message_send': ['messages'],
+  'message_delete': ['messages'],
+  'message_pin': ['messages'],
+  'thread_create': ['threads'],
+  'thread_update': ['threads'],
+  'permission_set': ['permissions'],
+  'invite_create': ['invites'],
+};
+
+const tools: ExtensionCapability[] = [
   {
     'name': 'guild_info',
     'summary': 'Server overview',
@@ -469,16 +379,6 @@ export const capabilities: Capability[] = [
         : `timed out ${member.user.username} for ${minutes} minutes`;
     },
   },
-  {
-    'name': 'bash',
-    'summary': 'Run a shell command',
-    'description':
-      'Run a shell command in the workspace. Shadowed builtin: routed through the sandbox (docker by default).',
-    'risk': 'destructive',
-    'params': [{ 'name': 'command', 'kind': 'string', 'description': 'shell command to execute', 'required': true }],
-    'run': async (ctx, args) => runShell(ctx.guild.id, requireStr(args, 'command')),
-  },
-
   {
     'name': 'channel_update',
     'summary': 'Rename or retune a channel',
@@ -806,541 +706,15 @@ export const capabilities: Capability[] = [
       return `banned ${name} (${member.id}) deletedMessages=${seconds}s`;
     },
   },
-  {
-    'name': 'git_status',
-    'summary': 'Workspace git state',
-    'description':
-      "This server's workspace repository: branch, remote, uncommitted files, unpushed commits and the last few commits.",
-    'risk': 'read',
-    'params': [],
-    'run': async ctx => describeWorkspace(ctx.guild.id),
-  },
-  {
-    'name': 'git_commit',
-    'summary': 'Commit workspace changes',
-    'description':
-      'Commit everything in the workspace with your own message. Each turn is committed automatically; use this for an explicit checkpoint, and it is pushed when auto-push is on.',
-    'risk': 'reversible',
-    'params': [{ 'name': 'message', 'kind': 'string', 'description': 'commit message', 'required': true }],
-    'run': async (ctx, args) =>
-      commitNow({ 'guildId': ctx.guild.id, 'message': requireStr(args, 'message').slice(0, 200) }),
-  },
-  {
-    'name': 'git_push',
-    'summary': 'Push the workspace',
-    'description':
-      'Push the current branch to the git server configured for this server. Refuses when no server is configured.',
-    'risk': 'reversible',
-    'params': [],
-    'run': async ctx => {
-      const pushed = pushWorkspace(ctx.guild.id);
-      if (!pushed.ok) throw new Error(pushed.detail);
-      return pushed.detail;
-    },
-  },
-  {
-    'name': 'git_repo_create',
-    'summary': 'Create a repository on the git server',
-    'description':
-      'Create a new repository for this server on the configured git server, optionally pointing the workspace at it as origin.',
-    'risk': 'reversible',
-    'params': [
-      { 'name': 'name', 'kind': 'string', 'description': 'repository name (letters, digits, . _ -)', 'required': true },
-      {
-        'name': 'attach',
-        'kind': 'boolean',
-        'description': 'set it as the workspace origin, only when the workspace has none',
-      },
-    ],
-    'run': async (ctx, args) => {
-      if (!config.git(ctx.guild.id).createRepos)
-        throw new Error('creating repositories is off here (git.createRepos is false)');
-      const name = requireStr(args, 'name');
-      if (!/^[\w.-]{1,64}$/.test(name)) throw new Error(`"${name}" is not a usable repository name`);
-      const repo = await createRepo(ctx.guild.id, name);
-      if (!repo) throw new Error('the git server refused the create request (see the bot log)');
-      const attached = args.attach === true ? attachOrigin(ctx.guild.id, repo.cloneUrl) : undefined;
-      return [
-        `created ${repo.name}: ${repo.htmlUrl}`,
-        attached ? `origin: ${attached.ok ? repo.cloneUrl : `not attached — ${attached.detail}`}` : 'origin unchanged',
-      ].join('\n');
-    },
-  },
-  {
-    'name': 'ptero_servers',
-    'summary': 'List panel servers',
-    'description':
-      'Servers this panel account can see: identifier, name, status, node, memory/disk limits and whether they are suspended.',
-    'risk': 'read',
-    'params': [],
-    'run': async ctx => {
-      const target = requirePtero(ctx.guild.id);
-      const payload = await pteroRequest(ctx.guild.id, 'client', keyFor(target, 'client'), '/');
-      const rows = listAttributes(payload);
-      if (rows.length === 0) return 'no servers are visible to this panel account';
-      return rows.map(describeServerLine).join('\n');
-    },
-  },
-  {
-    'name': 'ptero_server',
-    'summary': 'Panel server details',
-    'description':
-      'One server: state, resource usage (memory, cpu, disk, network, uptime), limits, node and sftp details.',
-    'risk': 'read',
-    'params': [{ 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true }],
-    'run': async (ctx, args) => {
-      const target = requirePtero(ctx.guild.id);
-      const key = keyFor(target, 'client');
-      const server = requirePteroServer(target, requireStr(args, 'server'));
-      const details = attributesOf(await pteroRequest(ctx.guild.id, 'client', key, `/servers/${server}`));
-      const stats = attributesOf(await pteroRequest(ctx.guild.id, 'client', key, `/servers/${server}/resources`));
-      const usage = nested(stats, 'resources');
-      return [
-        describeServerLine(details),
-        `state=${show(stats.current_state, 'unknown')} suspended=${stats.is_suspended === true}`,
-        `usage: memory=${bytes(usage.memory_bytes)} cpu=${show(usage.cpu_absolute)}% disk=${bytes(usage.disk_bytes)}`,
-        `network: rx=${bytes(usage.network_rx_bytes)} tx=${bytes(usage.network_tx_bytes)} uptime=${minutes(usage.uptime)}`,
-        `invocation: ${show(details.invocation, '-')}`,
-      ].join('\n');
-    },
-  },
-  {
-    'name': 'ptero_power',
-    'summary': 'Start, stop or restart a server',
-    'description':
-      'Send a power signal to a panel server: start, stop, restart or kill (kill is an immediate SIGKILL).',
-    'risk': 'destructive',
-    'params': [
-      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
-      {
-        'name': 'signal',
-        'kind': 'string',
-        'description': 'start | stop | restart | kill',
-        'required': true,
-        'choices': ['start', 'stop', 'restart', 'kill'],
-      },
-    ],
-    'run': async (ctx, args) => {
-      const target = requirePtero(ctx.guild.id);
-      const server = requirePteroServer(target, requireStr(args, 'server'));
-      const signal = pick(POWER_SIGNALS, requireStr(args, 'signal'), 'signal');
-      await pteroRequest(
-        ctx.guild.id,
-        'client',
-        keyFor(target, 'client'),
-        `/servers/${server}/power`,
-        powerRequest(signal),
-      );
-      return `sent ${signal} to ${server}`;
-    },
-  },
-  {
-    'name': 'ptero_command',
-    'summary': 'Send a console command',
-    'description': 'Run one command on a server console, exactly as if typed there. Only works while the server runs.',
-    'risk': 'destructive',
-    'params': [
-      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
-      { 'name': 'command', 'kind': 'string', 'description': 'console command, e.g. "say hello"', 'required': true },
-    ],
-    'run': async (ctx, args) => {
-      const target = requirePtero(ctx.guild.id);
-      const server = requirePteroServer(target, requireStr(args, 'server'));
-      const command = requireStr(args, 'command').slice(0, 2000);
-      await pteroRequest(
-        ctx.guild.id,
-        'client',
-        keyFor(target, 'client'),
-        `/servers/${server}/command`,
-        commandRequest(command),
-      );
-      return `sent to ${server} console: ${command}`;
-    },
-  },
-  {
-    'name': 'ptero_files',
-    'summary': 'List server files',
-    'description': 'List one directory of a server: name, size, type and modified time.',
-    'risk': 'read',
-    'params': [
-      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
-      { 'name': 'directory', 'kind': 'string', 'description': 'absolute path, default /' },
-    ],
-    'run': async (ctx, args) => {
-      const target = requirePteroFiles(ctx.guild.id);
-      const server = requirePteroServer(target, requireStr(args, 'server'));
-      const directory = safePath(str(args, 'directory') ?? '/', 'directory');
-      const payload = await pteroRequest(
-        ctx.guild.id,
-        'client',
-        keyFor(target, 'client'),
-        `/servers/${server}/files/list?directory=${encodeURIComponent(directory)}`,
-      );
-      const rows = listAttributes(payload);
-      if (rows.length === 0) return `${directory}: empty`;
-      return rows
-        .map(
-          file =>
-            `${file.is_file === true ? 'file' : 'dir '}  ${show(file.size)}B  ${show(file.name)}${file.is_symlink === true ? '  (symlink)' : ''}`,
-        )
-        .join('\n');
-    },
-  },
-  {
-    'name': 'ptero_file_read',
-    'summary': 'Read a server file',
-    'description': 'Read one file from a server, truncated to keep it skimmable.',
-    'risk': 'read',
-    'params': [
-      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
-      { 'name': 'file', 'kind': 'string', 'description': 'absolute path to the file', 'required': true },
-    ],
-    'run': async (ctx, args) => {
-      const target = requirePteroFiles(ctx.guild.id);
-      const server = requirePteroServer(target, requireStr(args, 'server'));
-      const file = safePath(requireStr(args, 'file'), 'file');
-      const content = await pteroRequest<string>(
-        ctx.guild.id,
-        'client',
-        keyFor(target, 'client'),
-        `/servers/${server}/files/contents?file=${encodeURIComponent(file)}`,
-        { 'accept': 'text/plain' },
-      );
-      const text = typeof content === 'string' ? content : JSON.stringify(content);
-      return `${file} (${text.length} bytes)\n${text.slice(0, 8000)}${text.length > 8000 ? '\n… truncated' : ''}`;
-    },
-  },
-  {
-    'name': 'ptero_file_write',
-    'summary': 'Write a server file',
-    'description':
-      'Overwrite one file on a server with the given contents. The previous contents are lost; there is no undo.',
-    'risk': 'destructive',
-    'params': [
-      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
-      { 'name': 'file', 'kind': 'string', 'description': 'absolute path to the file', 'required': true },
-      { 'name': 'content', 'kind': 'string', 'description': 'the complete new contents', 'required': true },
-    ],
-    'run': async (ctx, args) => {
-      const target = requirePteroFiles(ctx.guild.id);
-      const server = requirePteroServer(target, requireStr(args, 'server'));
-      const file = safePath(requireStr(args, 'file'), 'file');
-      const content = requireStr(args, 'content');
-      const request = writeRequest(content);
-      await pteroRequest(
-        ctx.guild.id,
-        'client',
-        keyFor(target, 'client'),
-        `/servers/${server}/files/write?file=${encodeURIComponent(file)}`,
-        request,
-      );
-      return `wrote ${content.length} bytes to ${file} on ${server}`;
-    },
-  },
-  {
-    'name': 'ptero_admin_servers',
-    'summary': 'List every server on the panel',
-    'description': 'Application API: all servers with their owner, node, allocation and suspension state.',
-    'risk': 'read',
-    'params': [{ 'name': 'filter', 'kind': 'string', 'description': 'optional name filter' }],
-    'run': async (ctx, args) => {
-      const target = requirePteroAdmin(ctx.guild.id);
-      const filter = str(args, 'filter');
-      const query = filter ? `?filter[name]=${encodeURIComponent(filter)}` : '';
-      const payload = await pteroRequest(ctx.guild.id, 'admin', keyFor(target, 'admin'), `/servers${query}`);
-      const rows = listAttributes(payload);
-      if (rows.length === 0) return 'no servers on the panel';
-      return rows
-        .map(
-          row =>
-            `id=${show(row.id)} uuid=${show(row.uuid)} ${describeServerLine(row)} owner=${show(nested(row, 'user').username, '-')}`,
-        )
-        .join('\n');
-    },
-  },
-  {
-    'name': 'ptero_admin_server',
-    'summary': 'One server, as an administrator',
-    'description': 'Application API: full configuration of one server, including owner, node and allocations.',
-    'risk': 'read',
-    'params': [{ 'name': 'id', 'kind': 'string', 'description': 'panel server id', 'required': true }],
-    'run': async (ctx, args) => {
-      const target = requirePteroAdmin(ctx.guild.id);
-      const id = requireStr(args, 'id');
-      const server = attributesOf(
-        await pteroRequest(ctx.guild.id, 'admin', keyFor(target, 'admin'), `/servers/${id}?include=user,allocations`),
-      );
-      const owner = nested(server, 'user');
-      const allocations = nested(server, 'relationships').allocations;
-      return [
-        describeServerLine(server),
-        `owner: ${show(owner.username)} <${show(owner.email)}>`,
-        `docker image: ${show(server.docker_image, '-')}`,
-        `startup: ${show(server.startup, '-')}`,
-        `allocations: ${JSON.stringify(allocations).slice(0, 400)}`,
-      ].join('\n');
-    },
-  },
-  {
-    'name': 'ptero_admin_users',
-    'summary': 'List panel users',
-    'description': 'Application API: panel accounts with their id, username, email and whether they are root admins.',
-    'risk': 'read',
-    'params': [{ 'name': 'query', 'kind': 'string', 'description': 'optional email or username filter' }],
-    'run': async (ctx, args) => {
-      const target = requirePteroAdmin(ctx.guild.id);
-      const query = str(args, 'query');
-      const payload = await pteroRequest(
-        ctx.guild.id,
-        'admin',
-        keyFor(target, 'admin'),
-        `/users${query ? `?filter[email]=${encodeURIComponent(query)}` : ''}`,
-      );
-      const rows = listAttributes(payload);
-      if (rows.length === 0) return 'no panel users';
-      return rows
-        .map(
-          row => `id=${show(row.id)} ${show(row.username)} <${show(row.email)}> root_admin=${row.root_admin === true}`,
-        )
-        .join('\n');
-    },
-  },
-  {
-    'name': 'ptero_admin_nodes',
-    'summary': 'List panel nodes',
-    'description': 'Application API: Wings nodes, their memory/disk capacity and how many servers each holds.',
-    'risk': 'read',
-    'params': [],
-    'run': async ctx => {
-      const target = requirePteroAdmin(ctx.guild.id);
-      const payload = await pteroRequest(ctx.guild.id, 'admin', keyFor(target, 'admin'), '/nodes');
-      const rows = listAttributes(payload);
-      if (rows.length === 0) return 'no nodes';
-      return rows
-        .map(
-          node =>
-            `id=${show(node.id)} ${show(node.name)} public=${show(node.public, '-')} mainteance=${node.maintenance_mode === true} memory=${show(node.memory)}MB disk=${show(node.disk)}MB`,
-        )
-        .join('\n');
-    },
-  },
-  {
-    'name': 'ptero_admin_nests',
-    'summary': 'List nests and eggs',
-    'description':
-      'Application API: nest ids and their eggs, which are what a new server needs (egg id + docker image).',
-    'risk': 'read',
-    'params': [{ 'name': 'nest', 'kind': 'string', 'description': 'nest id; omit to list nests' }],
-    'run': async (ctx, args) => {
-      const target = requirePteroAdmin(ctx.guild.id);
-      const key = keyFor(target, 'admin');
-      const nest = str(args, 'nest');
-      if (!nest) {
-        const nests = listAttributes(await pteroRequest(ctx.guild.id, 'admin', key, '/nests'));
-        return nests.map(row => `nest id=${show(row.id)} ${show(row.name)}`).join('\n') || 'no nests';
-      }
-      const eggs = listAttributes(await pteroRequest(ctx.guild.id, 'admin', key, `/nests/${nest}/eggs`));
-      return (
-        eggs
-          .map(
-            egg =>
-              `egg id=${show(egg.id)} ${show(egg.name)} docker=${JSON.stringify(egg.docker_images ?? {}).slice(0, 160)}`,
-          )
-          .join('\n') || 'no eggs'
-      );
-    },
-  },
-  {
-    'name': 'ptero_admin_user_create',
-    'summary': 'Create a panel user',
-    'description':
-      "Application API: create a panel account. The password is the caller's choice and is passed through as given.",
-    'risk': 'admin',
-    'params': [
-      { 'name': 'email', 'kind': 'string', 'description': 'email address', 'required': true },
-      { 'name': 'username', 'kind': 'string', 'description': 'username', 'required': true },
-      { 'name': 'first_name', 'kind': 'string', 'description': 'first name', 'required': true },
-      { 'name': 'last_name', 'kind': 'string', 'description': 'last name', 'required': true },
-      { 'name': 'password', 'kind': 'string', 'description': 'initial password', 'required': true },
-      { 'name': 'root_admin', 'kind': 'boolean', 'description': 'grant full panel administration' },
-    ],
-    'run': async (ctx, args) => {
-      const target = requirePteroAdmin(ctx.guild.id);
-      const body = JSON.stringify({
-        'email': requireStr(args, 'email'),
-        'username': requireStr(args, 'username'),
-        'first_name': requireStr(args, 'first_name'),
-        'last_name': requireStr(args, 'last_name'),
-        'password': requireStr(args, 'password'),
-        'root_admin': args.root_admin === true,
-      });
-      const created = attributesOf(
-        await pteroRequest(ctx.guild.id, 'admin', keyFor(target, 'admin'), '/users', { 'method': 'POST', body }),
-      );
-      return `created panel user ${show(created.username)} (id ${show(created.id)}) root_admin=${created.root_admin === true}`;
-    },
-  },
-  {
-    'name': 'ptero_admin_suspend',
-    'summary': 'Suspend or unsuspend a server',
-    'description': 'Application API: suspend (stops it and blocks the owner) or unsuspend one server.',
-    'risk': 'destructive',
-    'params': [
-      { 'name': 'id', 'kind': 'string', 'description': 'panel server id', 'required': true },
-      {
-        'name': 'action',
-        'kind': 'string',
-        'description': 'suspend | unsuspend',
-        'required': true,
-        'choices': ['suspend', 'unsuspend'],
-      },
-    ],
-    'run': async (ctx, args) => {
-      const target = requirePteroAdmin(ctx.guild.id);
-      const id = requireStr(args, 'id');
-      const action = pick(['suspend', 'unsuspend'] as const, requireStr(args, 'action'), 'action');
-      await pteroRequest(ctx.guild.id, 'admin', keyFor(target, 'admin'), `/servers/${id}/${action}`, {
-        'method': 'POST',
-      });
-      return `${action}ed panel server ${id}`;
-    },
-  },
-  {
-    'name': 'ptero_admin_server_create',
-    'summary': 'Create a panel server',
-    'description':
-      'Application API: create a server from an egg. Needs the user id, nest id, egg id, docker image, startup line and one allocation id.',
-    'risk': 'admin',
-    'params': [
-      { 'name': 'name', 'kind': 'string', 'description': 'server name', 'required': true },
-      { 'name': 'user_id', 'kind': 'string', 'description': 'panel user id that owns it', 'required': true },
-      { 'name': 'nest_id', 'kind': 'string', 'description': 'nest id', 'required': true },
-      { 'name': 'egg_id', 'kind': 'string', 'description': 'egg id', 'required': true },
-      { 'name': 'docker_image', 'kind': 'string', 'description': 'docker image for the egg', 'required': true },
-      { 'name': 'startup', 'kind': 'string', 'description': 'startup command', 'required': true },
-      { 'name': 'allocation_id', 'kind': 'string', 'description': 'allocation (port) id to use', 'required': true },
-      { 'name': 'memory_mb', 'kind': 'number', 'description': 'memory limit in MB (default 1024)' },
-      { 'name': 'disk_mb', 'kind': 'number', 'description': 'disk limit in MB (default 5120)' },
-      { 'name': 'cpu_percent', 'kind': 'number', 'description': 'cpu limit in percent (default 100)' },
-      {
-        'name': 'environment',
-        'kind': 'string',
-        'description': 'JSON object of egg variables, e.g. {"SERVER_JARFILE":"server.jar"}',
-      },
-    ],
-    'run': async (ctx, args) => {
-      const target = requirePteroAdmin(ctx.guild.id);
-      const environment = str(args, 'environment');
-      const body = JSON.stringify({
-        'name': requireStr(args, 'name'),
-        'user': Number(requireStr(args, 'user_id')),
-        'egg': Number(requireStr(args, 'egg_id')),
-        'docker_image': requireStr(args, 'docker_image'),
-        'startup': requireStr(args, 'startup'),
-        'environment': environment ? (JSON.parse(environment) as unknown) : {},
-        'limits': {
-          'memory': num(args, 'memory_mb') ?? 1024,
-          'swap': 0,
-          'disk': num(args, 'disk_mb') ?? 5120,
-          'io': 500,
-          'cpu': num(args, 'cpu_percent') ?? 100,
-        },
-        'feature_limits': { 'databases': 0, 'backups': 0, 'allocations': 0 },
-        'allocation': { 'default': Number(requireStr(args, 'allocation_id')) },
-        'start_on_completion': false,
-      });
-      const created = attributesOf(
-        await pteroRequest(ctx.guild.id, 'admin', keyFor(target, 'admin'), '/servers', { 'method': 'POST', body }),
-      );
-      return `created panel server ${show(created.name)} id=${show(created.id)} uuid=${show(created.uuid)}`;
-    },
-  },
 ];
 
-export const capabilityNames = capabilities.map(capability => capability.name);
-
 /**
- * Coarse sets a guild can switch off in one go (`features.tools.disabled`). `discord` is every capability
- * that talks to Discord; the rest are the areas inside it, plus `shell` for the sandboxed `bash` tool.
+ * The Discord surface. Everything here is authorised by the bot before it runs (rank ceiling, matrix, approvals,
+ * per-account access), so the extension only has to do the Discord work and say what it risked.
  */
-export const TOOL_SETS = [
-  'discord',
-  'server',
-  'channels',
-  'messages',
-  'threads',
-  'members',
-  'roles',
-  'permissions',
-  'invites',
-  'shell',
-  'git',
-  'pterodactyl',
-  'pterodactyl-admin',
-] as const;
-export type ToolSet = (typeof TOOL_SETS)[number];
-
-/**
- * Which sets each tool belongs to. Kept as one table so the taxonomy is readable in one place; `TOOL_SETS`
- * coverage is enforced by a test, so a new capability cannot ship without deciding its sets.
- */
-const SETS: Record<string, ToolSet[]> = {
-  'guild_info': ['discord', 'server'],
-  'channels_list': ['discord', 'channels'],
-  'channel_info': ['discord', 'channels'],
-  'channel_create': ['discord', 'channels'],
-  'channel_update': ['discord', 'channels'],
-  'channel_move': ['discord', 'channels'],
-  'channel_delete': ['discord', 'channels'],
-  'roles_list': ['discord', 'roles'],
-  'role_assign': ['discord', 'roles'],
-  'role_create': ['discord', 'roles'],
-  'role_update': ['discord', 'roles'],
-  'role_delete': ['discord', 'roles'],
-  'member_list': ['discord', 'members'],
-  'member_info': ['discord', 'members'],
-  'member_timeout': ['discord', 'members'],
-  'member_kick': ['discord', 'members'],
-  'member_ban': ['discord', 'members'],
-  'messages_fetch': ['discord', 'messages'],
-  'message_send': ['discord', 'messages'],
-  'message_delete': ['discord', 'messages'],
-  'message_pin': ['discord', 'messages'],
-  'thread_create': ['discord', 'threads'],
-  'thread_update': ['discord', 'threads'],
-  'permission_set': ['discord', 'permissions'],
-  'invite_create': ['discord', 'invites'],
-  'bash': ['shell'],
-  'git_status': ['git'],
-  'git_commit': ['git'],
-  'git_push': ['git'],
-  'git_repo_create': ['git'],
-  'ptero_servers': ['pterodactyl'],
-  'ptero_server': ['pterodactyl'],
-  'ptero_power': ['pterodactyl'],
-  'ptero_command': ['pterodactyl'],
-  'ptero_files': ['pterodactyl'],
-  'ptero_file_read': ['pterodactyl'],
-  'ptero_file_write': ['pterodactyl'],
-  'ptero_admin_servers': ['pterodactyl', 'pterodactyl-admin'],
-  'ptero_admin_server': ['pterodactyl', 'pterodactyl-admin'],
-  'ptero_admin_users': ['pterodactyl', 'pterodactyl-admin'],
-  'ptero_admin_nodes': ['pterodactyl', 'pterodactyl-admin'],
-  'ptero_admin_nests': ['pterodactyl', 'pterodactyl-admin'],
-  'ptero_admin_user_create': ['pterodactyl', 'pterodactyl-admin'],
-  'ptero_admin_suspend': ['pterodactyl', 'pterodactyl-admin'],
-  'ptero_admin_server_create': ['pterodactyl', 'pterodactyl-admin'],
+export const discordExtension: Extension = {
+  'id': 'discord',
+  'name': 'Discord server tools',
+  'description': 'Channels, roles, members, messages, threads, invites and permission overwrites.',
+  'capabilities': tools.map(tool => ({ ...tool, 'sets': AREAS[tool.name] ?? [] })),
 };
-
-export const setsOf = (name: string): ToolSet[] => SETS[name] ?? [];
-
-/** Names a guild may put in `features.tools.disabled`: one tool, or one set that covers several. */
-export const toolSetNames = (): string[] => [...capabilityNames, ...TOOL_SETS];
-
-/**
- * True when the tool is in the list — by name, or through any set it belongs to. The caller decides which way to
- * read it: a deny list (`features.tools.disabled`, `policy.tools.deny`, `access.users.<id>.tools.deny`) refuses
- * the match, a whitelist (`tools.allow`) refuses everything that does not match.
- */
-export const toolListed = (name: string, list: readonly string[]): boolean =>
-  list.includes(name) || setsOf(name).some(set => list.includes(set));

@@ -81,6 +81,13 @@
             <span id="detail-enabled" class="pill"></span>
             <span class="muted" id="detail-why"></span>
           </div>
+          <h2>Extensions</h2>
+          <p class="muted">
+            One extension owns a set of tools. Switch one off and its tools disappear for this server only —
+            <code>features.extensions.disabled</code> below is the same list.
+          </p>
+          <div id="extensions"></div>
+
           <div id="groups"></div>
 
           <h2>Per-account permissions</h2>
@@ -141,6 +148,23 @@
           }
           return select;
         }
+        if (entry.kind === 'multi' && entry.choices.length > 0) {
+          const boxes = document.createElement('span');
+          const chosen = new Set(Array.isArray(entry.value) ? entry.value : []);
+          for (const choice of entry.choices) {
+            const label = document.createElement('label');
+            label.style.marginRight = '0.75rem';
+            label.style.whiteSpace = 'nowrap';
+            const box = document.createElement('input');
+            box.type = 'checkbox';
+            box.value = choice;
+            box.checked = chosen.has(choice);
+            box.style.marginRight = '0.25rem';
+            label.append(box, document.createTextNode(choice));
+            boxes.append(label);
+          }
+          return boxes;
+        }
         if (entry.kind === 'choice' && entry.choices.length > 0) {
           const select = document.createElement('select');
           for (const value of entry.choices) {
@@ -198,7 +222,12 @@
             save.onclick = async () => {
               save.disabled = true;
               try {
-                const raw = Array.isArray(input.value) ? input.value.join(',') : input.value;
+                const boxes = [...input.querySelectorAll('input[type="checkbox"]')];
+                const raw = boxes.length
+                  ? boxes.filter(box => box.checked).map(box => box.value).join(',')
+                  : Array.isArray(input.value)
+                    ? input.value.join(',')
+                    : input.value;
                 await api(`/api/guilds/${active}`, { method: 'PATCH', body: JSON.stringify({ path: entry.path, raw }) });
                 say(`saved ${entry.path}`);
                 await openGuild(active);
@@ -219,6 +248,28 @@
         }
       }
 
+      function renderExtensions(extensions) {
+        const host = document.getElementById('extensions');
+        host.replaceChildren();
+        for (const extension of extensions) {
+          const row = document.createElement('div');
+          row.className = 'card';
+          const title = document.createElement('strong');
+          title.textContent = `${extension.id} — ${extension.name}`;
+          const state = document.createElement('span');
+          state.className = `pill ${extension.enabled && extension.available ? 'ok' : 'warn'}`;
+          state.textContent = !extension.enabled ? 'switched off' : extension.available ? 'on' : 'not configured';
+          state.style.marginLeft = '0.5rem';
+          const detail = document.createElement('div');
+          detail.className = 'desc';
+          detail.textContent = extension.available
+            ? `${extension.description} · ${extension.tools} tools`
+            : `${extension.description} · ${extension.reason || 'not configured'}`;
+          row.append(title, state, detail);
+          host.append(row);
+        }
+      }
+
       async function openGuild(id) {
         active = id;
         const detail = await api(`/api/guilds/${id}`);
@@ -232,6 +283,7 @@
           ? `you are editing as: ${detail.canEdit.reason}`
           : detail.canEdit.reason;
         renderGroups(detail.groups);
+        renderExtensions(detail.extensions ?? []);
 
         const access = await api(`/api/guilds/${id}/access`).catch(() => undefined);
         const area = $('access-json');

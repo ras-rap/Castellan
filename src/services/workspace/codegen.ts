@@ -1,16 +1,17 @@
 import { models } from '@services/agent/models.ts';
 import { providerConfigBlocks } from '@services/agent/providers.ts';
-import { capabilities, setsOf, toolListed, type ParamSpec } from '@services/bridge/capabilities.ts';
 import { MODELS, config, type GuildFeatures } from '@services/config.ts';
+import { capabilityAvailability, capabilities, setsOf, toolListed } from '@services/extensions/registry.ts';
 import { resolveForge } from '@services/git/forge.ts';
 import { resolvePtero } from '@services/pterodactyl/api.ts';
 
-/** The panel tools that only exist when `pterodactyl.files` is on. */
-const PANEL_FILE_TOOLS = ['ptero_files', 'ptero_file_read', 'ptero_file_write'];
+import type { ParamSpec } from '@services/extensions/protocol.ts';
 
 /** The guild's switches, resolved once per render; no guild means "deployment defaults" (tests, docs). */
 const featuresFor = (guildId?: string): GuildFeatures =>
-  guildId ? config.features(guildId) : { 'tools': { 'disabled': [] }, 'clarify': 'normal' };
+  guildId
+    ? config.features(guildId)
+    : { 'tools': { 'disabled': [] }, 'extensions': { 'disabled': [] }, 'clarify': 'normal' };
 
 /**
  * How hard the persona pushes the agent to ask instead of assuming. This is the only place `features.clarify`
@@ -34,15 +35,22 @@ const CLARIFY_DIRECTIVE: Record<GuildFeatures['clarify'], string[]> = {
 };
 
 /** What the persona says about tools this guild switched off, so absence from the tool list is explained. */
-const switchedOff = (disabled: string[]): string =>
-  disabled.length === 0
-    ? ''
-    : `
-## Switched off in this server
-\`features.tools.disabled\` here is \`${disabled.join(', ')}\`, so those tools are not in your tool list at all.
-If a request needs one, say it is switched off here and name the setting — never claim you did it, and do not
-improvise the same effect through another tool.
-`;
+const switchedOff = (disabledTools: string[], disabledExtensions: string[]): string => {
+  if (disabledTools.length === 0 && disabledExtensions.length === 0) return '';
+  const lines = ['', '## Switched off in this server'];
+  if (disabledExtensions.length > 0)
+    lines.push(
+      `\`features.extensions.disabled\` here is \`${disabledExtensions.join(', ')}\`: that whole extension is gone.`,
+    );
+  if (disabledTools.length > 0)
+    lines.push(`\`features.tools.disabled\` here is \`${disabledTools.join(', ')}\`: those tools are gone.`);
+  lines.push(
+    'If a request needs one, say it is switched off here and name the setting — never claim you did it, and do not',
+    'improvise the same effect through another tool.',
+    '',
+  );
+  return `${lines.join('\n')}`;
+};
 
 const zodFor = (param: ParamSpec): string => {
   const base =
@@ -61,31 +69,16 @@ const zodFor = (param: ParamSpec): string => {
  * the bridge's validators cannot drift. The guild id and secret arrive as env vars of the guild's own
  * opencode server, which keeps the generated file identical for every workspace.
  *
- * `features.tools.disabled` removes a capability from the model-facing list entirely: a switched-off tool is
- * not described, not offered, and (see `decide`) not runnable even if a stale client calls it anyway. The git
- * tools follow the same rule: no server configured means `git_push`/`git_repo_create` are not offered at all,
- * because a tool that can only fail is a tool the model wastes turns on.
+ * Two questions decide what the model is offered, and both are answered by the extension itself:
+ * `features.tools.disabled` (this guild switched the tool or its set off) and the extension's own per-guild
+ * availability (no git server, no panel key, files off). A tool that cannot work is not described at all, and
+ * `decide()` refuses it anyway, so a stale client cannot slip one through.
  */
 export function renderDiscordToolFile(guildId?: string): string {
   const disabled = featuresFor(guildId).tools.disabled;
-  const forge = guildId === undefined ? undefined : resolveForge(guildId);
-  const createRepos = guildId !== undefined && config.git(guildId).createRepos;
-  const panel = guildId === undefined ? undefined : resolvePtero(guildId);
-  const panelSettings = guildId === undefined ? undefined : config.pterodactyl(guildId);
   const tools = capabilities
     .filter(capability => !toolListed(capability.name, disabled))
-    .filter(capability => {
-      if (guildId === undefined) return true;
-      if (capability.name === 'git_push') return forge !== undefined;
-      if (capability.name === 'git_repo_create') return forge !== undefined && createRepos;
-      // Panel tools exist only as far as the guild has switched them on: no panel, no admin, no files.
-      if (capability.name.startsWith('ptero_')) {
-        if (panel === undefined) return false;
-        if (capability.name.startsWith('ptero_admin_') && panelSettings?.admin !== true) return false;
-        if (PANEL_FILE_TOOLS.includes(capability.name) && panelSettings?.files !== true) return false;
-      }
-      return true;
-    })
+    .filter(capability => guildId === undefined || capabilityAvailability(guildId, capability.name).ok)
     .map(capability => {
       const args = capability.params.length
         ? `{\n${capability.params.map(param => `    ${param.name}: ${zodFor(param)},`).join('\n')}\n  }`
@@ -257,7 +250,7 @@ ${CLARIFY_DIRECTIVE[features.clarify].join('\n')}
 ## Style
 - Discord messages: short, skimmable, no walls of text. Code goes in fenced blocks with a language tag.
 - Report the outcome first, then the evidence (ids, paths, exit codes).
-${gitSection(guildId)}${panelSection(guildId)}${switchedOff(disabled)}
+${gitSection(guildId)}${panelSection(guildId)}${switchedOff(disabled, features.extensions.disabled)}
 ## Memory
 \`\`MEMORY.md\`\` in this workspace holds durable facts about this server and its people. Trust it, but prefer
 fresh tool output when the two disagree, and say which one you used.

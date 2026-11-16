@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import { config } from '@services/config.ts';
 import { services } from '@services/discord/services.ts';
+import { extensionStatus } from '@services/extensions/registry.ts';
 import { applySetting } from '@services/policy/panel.ts';
 import { SETTINGS, describeSetting, domainOf, readSetting } from '@services/policy/settings.ts';
 import { CLERK_PUBLISHABLE_KEY, WEB_PORT } from '@utils/env.ts';
@@ -143,6 +144,8 @@ export function startWeb(input: { port: number; issuer: string; publishableKey: 
         return json({
           'guild': guilds.find(guild => guild.id === guildId) ?? { 'id': guildId },
           'canEdit': verdict,
+          // Which extensions exist here, whether they are switched on, and why not — the toggle list.
+          'extensions': extensionStatus(guildId),
           'groups': settingsSnapshot(principal, guildId),
         });
       }

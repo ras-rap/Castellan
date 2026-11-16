@@ -1,10 +1,10 @@
 import { effectiveModel } from '@services/agent/models.ts';
-import { capabilities } from '@services/bridge/capabilities.ts';
+import { capabilities } from '@services/extensions/registry.ts';
 import { BRAND_COLOR, EPHEMERAL } from '@utils/constants.ts';
 import { EmbedBuilder } from 'discord.js';
 import { Discord, Slash } from 'discordx';
 
-import type { Risk } from '@services/bridge/capabilities.ts';
+import type { Risk } from '@services/extensions/protocol.ts';
 import type { ChatInputCommandInteraction } from 'discord.js';
 
 const RISK_ORDER: Risk[] = ['read', 'reversible', 'destructive', 'admin'];
@@ -78,7 +78,7 @@ export class HelpCommand {
         },
         ...toolFields,
       )
-      .setFooter({ 'text': `${capabilities.length} tools · authored in src/services/bridge/capabilities.ts` });
+      .setFooter({ 'text': `${capabilities.length} tools · authored as extensions in src/services/extensions/` });
 
     await interaction.reply({ 'embeds': [embed], 'flags': EPHEMERAL });
   }

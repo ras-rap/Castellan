@@ -462,6 +462,31 @@ enforced in three places from one profile: `hardCheck` (every tool call, `layer:
 registered command list — so a typo fails loudly instead of silently leaving access on. Note the reminder: a
 blocked account that is also in `access.users` keeps its profile, so unblocking restores the limits.
 
+### Extensions
+
+Every tool belongs to an **extension**: `discord`, `shell`, `git`, `pterodactyl`. An extension owns its tools, says
+when they exist for a guild, and is switched on or off per server — so "add tools" is one file plus one line, and
+"turn off a whole area" is one word.
+
+| Extension | Tools | Available when |
+| --- | --- | --- |
+| `discord` | 25 channels/roles/members/messages/threads/invites/permissions tools | always |
+| `shell` | `bash` (the shadowed builtin) | always — the guild's `shell.mode` decides container vs host |
+| `git` | `git_status`, `git_commit`; `git_push`, `git_repo_create` when a forge is configured | as declared per tool |
+| `pterodactyl` | 15 panel tools; the application-API half needs `pterodactyl.admin`, the file trio needs `pterodactyl.files` | a panel key + `pterodactyl.enabled` |
+
+```
+/config set features.extensions.disabled git,pterodactyl   # per server, whole tool sets
+/access set user:@helperC key:tools-deny value:shell,git   # per account, same names
+```
+
+An extension's `available()` is what keeps "a tool that can only fail" out of the model's list: no git server means
+no `git_push`, no panel key means no panel tools, `pterodactyl.files: false` means no file tools. The gate asks the
+same question (`capabilityAvailability`) before every call, so a stale client cannot use one either.
+
+Writing one is documented in [`docs/EXTENSIONS.md`](./docs/EXTENSIONS.md) — the contract, the rules that keep it
+inside the guild's sandbox (`ctx.shell`, never `Bun.spawn`), and a worked example.
+
 ### Feature flags
 
 Two switches change what the agent *is*, not what a rank may do. Both narrow only, so a guild admin owns them,

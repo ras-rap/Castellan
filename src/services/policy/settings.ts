@@ -1,5 +1,4 @@
 import { modelRef } from '@services/agent/models.ts';
-import { TOOL_SETS, capabilityNames, toolSetNames } from '@services/bridge/capabilities.ts';
 import {
   CLARIFY_LEVELS,
   RISK_NAMES,
@@ -10,6 +9,7 @@ import {
   isOwner,
   type GuildSettings,
 } from '@services/config.ts';
+import { EXTENSIONS, TOOL_SETS, capabilityNames, toolSetNames } from '@services/extensions/registry.ts';
 
 /**
  * Who may change a setting. `admin` means a guild admin (tier 3, or the bot owner); `owner` means the bot
@@ -59,6 +59,18 @@ const toolNames = (raw: string): string[] => {
   const unknown = names.find(name => !TOOL_NAMES.includes(name));
   if (unknown) throw new Error(`"${unknown}" is not one of the ${TOOL_NAMES.length} tools`);
   return names;
+};
+
+/** Extensions are switched off by id, so a typo fails at `/config set` instead of silently doing nothing. */
+const extensionNames = (raw: string): string[] => {
+  const ids = raw
+    .split(/[\s,]+/)
+    .map(entry => entry.trim().toLowerCase())
+    .filter(entry => entry.length > 0);
+  const known = EXTENSIONS.map(extension => extension.id);
+  const unknown = ids.find(id => !known.includes(id));
+  if (unknown) throw new Error(`"${unknown}" is not an extension; extensions are ${known.join(', ')}`);
+  return ids;
 };
 
 /** `features.tools.disabled` accepts one tool, one set, or a mix — "discord" is the whole Discord surface. */
@@ -171,6 +183,12 @@ export const SETTINGS: Setting[] = [
     'scope': 'admin',
     'description': 'tools or whole sets switched off here — not even offered to the model',
     'parse': toolOrSets,
+  },
+  {
+    'path': 'features.extensions.disabled',
+    'scope': 'admin',
+    'description': 'extensions switched off here — the whole tool set goes with them',
+    'parse': extensionNames,
   },
   {
     'path': 'features.clarify',
@@ -417,7 +435,8 @@ export const writableBy = (setting: Setting, userId: string): boolean => setting
  * invents a value the slash command would refuse, and a test asserts every listed choice parses.
  */
 export type ValueDomain = {
-  kind: 'boolean' | 'choice' | 'text' | 'list' | 'number';
+  /** `multi` is a set of choices (checkboxes / a multi-select), stored as a comma-separated list. */
+  kind: 'boolean' | 'choice' | 'multi' | 'text' | 'list' | 'number';
   choices?: readonly string[];
   /** Shown in the modal for free-text entry: what the value should look like. */
   placeholder?: string;
@@ -438,6 +457,7 @@ export const VALUE_DOMAINS: Record<string, ValueDomain> = {
   'policy.tools.deny': { 'kind': 'list', 'placeholder': 'tool names, comma separated' },
   'policy.tools.allow': { 'kind': 'list', 'placeholder': 'tool names, comma separated' },
   'features.tools.disabled': { 'kind': 'list', 'placeholder': 'tools or sets, e.g. channels, shell, git' },
+  'features.extensions.disabled': { 'kind': 'multi', 'choices': EXTENSIONS.map(extension => extension.id) },
   'features.clarify': { 'kind': 'choice', 'choices': CLARIFY_LEVELS },
   'shell.mode': { 'kind': 'choice', 'choices': ['docker', 'host'] },
   'shell.image': { 'kind': 'text', 'placeholder': 'debian:bookworm-slim' },

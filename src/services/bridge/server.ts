@@ -1,13 +1,15 @@
 import { config } from '@services/config.ts';
 import { audit, sessions, toolStats, workspaces } from '@services/database/sqlite.ts';
 import { requestApproval } from '@services/discord/approvals.ts';
+import { capabilities } from '@services/extensions/registry.ts';
 import { decide } from '@services/policy/gate.ts';
+import { runShell } from '@services/workspace/shell.ts';
 import { log } from '@utils/logger.ts';
 import { z } from 'zod';
 
-import { capabilities, type ParamSpec } from './capabilities.ts';
 import { capabilityByName } from './lookup.ts';
 
+import type { ParamSpec } from '@services/extensions/protocol.ts';
 import type { Client, Guild, GuildMember } from 'discord.js';
 
 const logger = log('bridge');
@@ -163,7 +165,14 @@ export function startBridge(client: Client): BridgeServer {
       const started = Date.now();
       try {
         const output = await capability.run(
-          { client, guild, 'actorId': session.actor_id ?? 'unknown', 'channelId': session.channel_id },
+          {
+            client,
+            guild,
+            'actorId': session.actor_id ?? 'unknown',
+            'channelId': session.channel_id,
+            // Extensions never spawn processes themselves: execution goes through this guild's shell mode.
+            'shell': (command: string) => runShell(guildId, command),
+          },
           validated.data,
         );
         toolStats.bump(guildId, name, true, Date.now() - started);

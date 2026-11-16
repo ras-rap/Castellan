@@ -9,6 +9,7 @@ import { audit, sessions } from '@services/database/sqlite.ts';
 import { services } from '@services/discord/services.ts';
 import { writeDigest } from '@services/memory/inject.ts';
 import { memory } from '@services/memory/store.ts';
+import { runShell } from '@services/workspace/shell.ts';
 import { DISCORD_TOKEN, OWNER_ID } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 import { Events } from 'discord.js';
@@ -99,7 +100,13 @@ async function main(): Promise<void> {
 
   // `--write` exercises the structural capabilities against this guild: create, lock down, retune, delete.
   if (process.argv.includes('--write')) {
-    const ctx = { client, guild, 'actorId': OWNER_ID, 'channelId': channel.id };
+    const ctx = {
+      client,
+      guild,
+      'actorId': OWNER_ID,
+      'channelId': channel.id,
+      'shell': (command: string) => runShell(guild.id, command),
+    };
     const name = `oda-e2e-${Date.now().toString(36)}`;
     let created: string | undefined;
     try {

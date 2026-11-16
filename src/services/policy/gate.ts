@@ -1,4 +1,5 @@
 import { RANK_NAMES, config, guildDefaults, type GuildPolicy } from '@services/config.ts';
+import { capabilityAvailability } from '@services/extensions/registry.ts';
 import { shellModeOf } from '@services/workspace/shell.ts';
 import { log } from '@utils/logger.ts';
 
@@ -15,7 +16,7 @@ import {
 import { SAFETY_QUESTIONS, askJev, jevMode, type JevAnswers } from './jev.ts';
 import { reviewWithAgent, type ReviewFn } from './review.ts';
 
-import type { Capability, Risk } from '@services/bridge/capabilities.ts';
+import type { Capability, Risk } from '@services/extensions/protocol.ts';
 import type { GuildMember } from 'discord.js';
 
 const logger = log('policy');
@@ -277,6 +278,7 @@ export async function decide(
     account,
     'protectedIds': deps.protectedIds,
     'pterodactyl': guild.pterodactyl,
+    'available': name => capabilityAvailability(guildId, name),
   });
   if (hard.verdict === 'deny') return asDecision(hard);
   if (capability.risk === 'read') return asDecision(hard);

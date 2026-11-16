@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { Runtime } from '@services/agent/runtime.ts';
-import { TOOL_SETS, capabilities, setsOf, toolListed } from '@services/bridge/capabilities.ts';
 import { capabilityByName } from '@services/bridge/lookup.ts';
 import { guildDefaults, type GuildSettings } from '@services/config.ts';
 import { audit, sessions } from '@services/database/sqlite.ts';
+import { TOOL_SETS, capabilities, setsOf, toolListed } from '@services/extensions/registry.ts';
 import { commandAccess, parseProfileValue } from '@services/policy/access.ts';
 import { decide, vibeVerdict } from '@services/policy/gate.ts';
 import { ceilingFor, hardCheck, shellRule, strictest, tierOf } from '@services/policy/hard.ts';
