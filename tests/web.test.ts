@@ -444,6 +444,31 @@ describe('the dashboard over http', () => {
       // a stranger cannot touch it
       const denied = await call('/api/guilds/111/access', { 'method': 'PUT', 'body': '{}' }, tokens.stranger);
       expect(denied.status).toBe(403);
+
+      // and a server owner cannot mint `owner`, nor block themselves: those ranks are fixed
+      const mint = await call(
+        '/api/guilds/111/access',
+        { 'method': 'PUT', 'body': JSON.stringify({ 'blocked': [], 'users': { 'friend': { 'rank': 'owner' } } }) },
+        tokens.guild,
+      );
+      expect(mint.status).toBe(403);
+      expect(String(mint.body.detail)).toContain('only the bot owner can grant that rank');
+
+      const selfBlock = await call(
+        '/api/guilds/111/access',
+        { 'method': 'PUT', 'body': JSON.stringify({ 'blocked': ['discord-owner-id'], 'users': {} }) },
+        tokens.guild,
+      );
+      expect(selfBlock.status).toBe(403);
+      expect(String(selfBlock.body.detail)).toContain('fixed rank');
+
+      // the bot owner can
+      const ownerMint = await call(
+        '/api/guilds/111/access',
+        { 'method': 'PUT', 'body': JSON.stringify({ 'blocked': [], 'users': { 'friend': { 'rank': 'owner' } } }) },
+        tokens.owner,
+      );
+      expect(ownerMint.status).toBe(200);
     } finally {
       remove();
       server.stop(true);

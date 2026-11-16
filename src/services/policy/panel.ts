@@ -2,12 +2,12 @@ import { guildDefaults, isOwner, config, type GuildSettings } from '@services/co
 import { services } from '@services/discord/services.ts';
 import { log } from '@utils/logger.ts';
 
+import { setSetting } from './dotted.ts';
 import {
   defaultFor,
   describeSetting,
   parseSetting,
   settingByPath,
-  setSetting,
   settingsByCategory,
   writableBy,
   type Setting,

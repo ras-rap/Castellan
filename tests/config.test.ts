@@ -8,18 +8,11 @@ import { guildDefaults, type GuildSettings } from '@services/config.ts';
 import { audit, sessions } from '@services/database/sqlite.ts';
 import { TOOL_SETS, capabilities, setsOf, toolListed } from '@services/extensions/registry.ts';
 import { commandAccess, parseProfileValue } from '@services/policy/access.ts';
+import { readSetting, setSetting } from '@services/policy/dotted.ts';
 import { decide, vibeVerdict } from '@services/policy/gate.ts';
 import { ceilingFor, hardCheck, shellRule, strictest, tierOf } from '@services/policy/hard.ts';
 import { parseReview } from '@services/policy/review.ts';
-import {
-  defaultFor,
-  describeSetting,
-  parseSetting,
-  readSetting,
-  setSetting,
-  settingByPath,
-  SETTINGS,
-} from '@services/policy/settings.ts';
+import { defaultFor, describeSetting, parseSetting, settingByPath, SETTINGS } from '@services/policy/settings.ts';
 import { renderDiscordToolFile, renderWorkspaceConfig } from '@services/workspace/codegen.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 

@@ -2,6 +2,8 @@ import { RANK_NAMES, RISK_NAMES, config } from '@services/config.ts';
 import { capabilityNames, toolSetNames } from '@services/extensions/registry.ts';
 import { MetadataStorage } from 'discordx';
 
+import { type ProfileKey } from './profile.ts';
+
 export type AccessCheck = { allowed: boolean; reason: string };
 
 /**
@@ -44,6 +46,42 @@ export function commandAccess(guildId: string, userId: string, names: string[]):
   return { 'allowed': true, 'reason': 'not restricted' };
 }
 
+/**
+ * The two fixed ranks, as a reusable check for every writer that is not the gate (the dashboard writes whole
+ * access objects, so it cannot lean on `accessRule`). Returns the reason to refuse, or `undefined` to allow.
+ *
+ * `actor` is the bot owner's id when the caller is the bot owner, `undefined` otherwise.
+ */
+export function protectedAccessWrite(input: {
+  guildOwnerId?: string;
+  botOwnerId?: string;
+  actorIsBotOwner: boolean;
+  next: { blocked: string[]; users: Record<string, { rank?: string }> };
+  current: { blocked: string[]; users: Record<string, { rank?: string }> };
+}): string | undefined {
+  if (input.actorIsBotOwner) return undefined;
+  const protectedIds = [input.guildOwnerId, input.botOwnerId].filter((id): id is string => Boolean(id));
+  for (const id of protectedIds) {
+    if (input.next.blocked.includes(id))
+      return `${id} is a fixed rank (${id === input.botOwnerId ? 'bot owner' : 'server owner'}); only the bot owner can block it`;
+    const before = input.current.users[id];
+    const after = input.next.users[id];
+    if (JSON.stringify(before ?? null) !== JSON.stringify(after ?? null))
+      return `${id} is a fixed rank (${id === input.botOwnerId ? 'bot owner' : 'server owner'}); only the bot owner can change it`;
+  }
+  for (const [id, profile] of Object.entries(input.next.users)) {
+    if (profile?.rank !== 'owner') continue;
+    if (input.current.users[id]?.rank === 'owner') continue;
+    return `${id} cannot be pinned to \`owner\`: only the bot owner can grant that rank`;
+  }
+  for (const [id, profile] of Object.entries(input.current.users)) {
+    if (profile?.rank !== 'owner') continue;
+    if (input.next.users[id]?.rank === 'owner') continue;
+    return `${id} is pinned to \`owner\`; only the bot owner can change it`;
+  }
+  return undefined;
+}
+
 /** Whether an account may talk to the agent at all (a mention or a reply starts a turn). */
 export function promptAccess(guildId: string, userId: string): AccessCheck {
   const access = config.access(guildId);
@@ -51,36 +89,6 @@ export function promptAccess(guildId: string, userId: string): AccessCheck {
     ? { 'allowed': false, 'reason': 'this account is blocked on this server' }
     : { 'allowed': true, 'reason': 'not blocked' };
 }
-
-export type ProfileKey = 'rank' | 'risk' | 'tools-allow' | 'tools-deny' | 'commands-allow' | 'commands-deny';
-
-export const PROFILE_KEYS: ProfileKey[] = [
-  'rank',
-  'risk',
-  'tools-allow',
-  'tools-deny',
-  'commands-allow',
-  'commands-deny',
-];
-
-/** Where a key lives in the guild document, so `/access set` and `/config` share one shape. */
-export const profilePath = (userId: string, key: ProfileKey): string => {
-  const base = `access.users.${userId}`;
-  switch (key) {
-    case 'rank':
-      return `${base}.rank`;
-    case 'risk':
-      return `${base}.risk`;
-    case 'tools-allow':
-      return `${base}.tools.allow`;
-    case 'tools-deny':
-      return `${base}.tools.deny`;
-    case 'commands-allow':
-      return `${base}.commands.allow`;
-    case 'commands-deny':
-      return `${base}.commands.deny`;
-  }
-};
 
 const split = (raw: string): string[] =>
   raw

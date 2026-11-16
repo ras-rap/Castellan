@@ -4,9 +4,11 @@ import { resolve } from 'node:path';
 import { config } from '@services/config.ts';
 import { services } from '@services/discord/services.ts';
 import { extensionStatus } from '@services/extensions/registry.ts';
+import { protectedAccessWrite } from '@services/policy/access.ts';
+import { readSetting } from '@services/policy/dotted.ts';
 import { applySetting } from '@services/policy/panel.ts';
-import { SETTINGS, describeSetting, domainOf, readSetting } from '@services/policy/settings.ts';
-import { CLERK_PUBLISHABLE_KEY, WEB_HOST, WEB_PORT } from '@utils/env.ts';
+import { SETTINGS, describeSetting, domainOf } from '@services/policy/settings.ts';
+import { CLERK_PUBLISHABLE_KEY, OWNER_ID, WEB_HOST, WEB_PORT } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 
 import { authenticate, issuerFromPublishableKey } from './auth.ts';
@@ -232,6 +234,14 @@ export function startWeb(input: {
           ? body.blocked.filter((id): id is string => typeof id === 'string')
           : [];
         const users = typeof body?.users === 'object' && body.users !== null ? body.users : {};
+        const refusal = protectedAccessWrite({
+          'guildOwnerId': guildFacts().find(guild => guild.id === guildId)?.discordOwnerId,
+          'botOwnerId': OWNER_ID,
+          'actorIsBotOwner': principal.kind === 'owner',
+          'next': { blocked, 'users': users as Record<string, { rank?: string }> },
+          'current': config.access(guildId),
+        });
+        if (refusal) return json({ 'error': 'forbidden', 'detail': refusal }, 403);
         try {
           config.patchGuild(guildId, { ...currentSettings(guildId), 'access': { blocked, users } });
         } catch (error) {

@@ -4,6 +4,7 @@ import {
   isOwner,
   type GuildFeatures,
   type GuildPolicy,
+  type GuildAccess,
   type GuildPterodactyl,
   type UserAccess,
 } from '@services/config.ts';
@@ -43,15 +44,21 @@ export const CEILING: Record<Risk, Record<Tier, Verdict>> = {
 export const riskAtMost = (risk: Risk, max: GuildPolicy['vibe']['maxRisk']): boolean =>
   RISK_ORDER.indexOf(risk) <= RISK_ORDER.indexOf(max);
 
+/**
+ * The rank an account holds here. Two ranks are structural and cannot be edited away: the **bot owner** and the
+ * **Discord server's owner** are always 4, inside every server for the bot owner and inside their own server for
+ * the server owner. Only then do blocks, pins and roles apply — a server owner must not be able to demote the bot
+ * owner (or themselves) with a profile, and a profile cannot block them out of their own server.
+ */
 export function tierOf(guildId: string, member: GuildMember | null): Tier {
   if (!member) return 0;
+  if (isOwner(member.id) || member.id === member.guild.ownerId) return 4;
   const guildConfig = config.guild(guildId);
   // A blocked account is a guest everywhere: `/config`, approvals and the ceiling all read through here.
   if (guildConfig?.access.blocked.includes(member.id)) return 0;
-  // An owner-authored rank pin beats the role-derived rank, in both directions.
+  // An owner-authored rank pin replaces the role-derived rank, in both directions.
   const pinned = guildConfig?.access.users[member.id]?.rank;
   if (pinned) return RANK_NAMES.indexOf(pinned) as Tier;
-  if (isOwner(member.id) || member.id === member.guild.ownerId) return 4;
   if (guildConfig?.roles.admin.some(id => member.roles.cache.has(id))) return 3;
   if (guildConfig?.roles.trusted.some(id => member.roles.cache.has(id))) return 2;
   return 1;
@@ -154,6 +161,50 @@ export function shellRule(command: string): HardDecision | undefined {
   return hit ? { 'verdict': hit.verdict, 'layer': 'pattern', 'reason': `${hit.id}: ${hit.why}` } : undefined;
 }
 
+/** Tools that write per-account permissions, and so need the delegation rules below. */
+const ACCESS_TOOLS = ['access_set', 'access_block'];
+
+/**
+ * Who may change whose permissions. The hierarchy is deliberately shallow and its two fixed ranks are not
+ * editable: the bot owner may do anything; the server owner may arrange their own server's people (that is what
+ * "control over their server" means) but cannot touch the bot owner's profile, pin anyone to `owner`, or edit an
+ * account that is already pinned there. Nobody can lift themselves: the caller's own rank is what the ceiling
+ * checked before this runs.
+ */
+function accessRule(input: HardInput, capability: Capability, args: Record<string, unknown>): HardDecision | undefined {
+  if (!ACCESS_TOOLS.includes(capability.name)) return undefined;
+  if (isOwner(input.actorId ?? '')) return undefined;
+
+  const target = typeof args.user_id === 'string' ? args.user_id : '';
+  if (target.length === 0) return undefined;
+  if (target === input.guildOwnerId)
+    return {
+      'verdict': 'deny',
+      'layer': 'pattern',
+      'reason': 'access-target: the server owner ranks above every delegate; only the bot owner can change that',
+    };
+  if (isOwner(target))
+    return {
+      'verdict': 'deny',
+      'layer': 'pattern',
+      'reason': 'access-target: the bot owner outranks everyone here; only the bot owner can change that',
+    };
+  const profile = input.access?.users[target];
+  if (profile?.rank === 'owner')
+    return {
+      'verdict': 'deny',
+      'layer': 'pattern',
+      'reason': 'access-target: that account is pinned to `owner`; only the bot owner can change it',
+    };
+  if (capability.name === 'access_set' && args.key === 'rank' && String(args.value).trim().toLowerCase() === 'owner')
+    return {
+      'verdict': 'deny',
+      'layer': 'pattern',
+      'reason': 'access-rank: only the bot owner can pin someone to `owner`',
+    };
+  return undefined;
+}
+
 /** Client tools address a server by `identifier`; the admin pair addresses it by panel `id`. */
 const PTERO_SERVER_TOOLS = [
   'ptero_server',
@@ -205,6 +256,9 @@ function argumentRule(
   const availability = input.available?.(capability.name);
   if (availability && !availability.ok) return { 'verdict': 'deny', 'layer': 'tools', 'reason': availability.reason };
 
+  const access = accessRule(input, capability, args);
+  if (access) return access;
+
   const panel = pterodactylRule(capability, args, pterodactyl);
   if (panel) return panel;
 
@@ -248,6 +302,11 @@ export type HardInput = {
   protectedIds?: readonly string[];
   /** This guild's panel switches, so a stale client cannot use a tool the guild has since switched off. */
   pterodactyl?: GuildPterodactyl;
+  /** Who is asking, and who owns this server — the two fixed ranks in the hierarchy. */
+  actorId?: string;
+  guildOwnerId?: string;
+  /** The guild's current per-account permissions, so a delegate cannot edit a rank above their own. */
+  access?: GuildAccess;
   /**
    * Per-guild extension availability: switched off here, or not configured here. Answered by the registry, so a
    * disabled extension is refused in code and not merely absent from the model's tool list.

@@ -427,6 +427,11 @@ because `rank` pins a tier and that grants capability.
 /access set user:<@someone> key:rank value:admin                # full tools, no Discord role needed
 /access set user:<@someone> key:commands-deny value:config:set,config:reset,model:set,vibe
 /access block user:<@someone>                                   # may not use the bot at all
+
+# the agent has the same power, with the same hierarchy rules (access_show / access_set / access_block):
+# "User1 isn't allowed to delete channels or run shell commands, only read and send messages" →
+#   access_set { user_id: "user1", key: "tools-deny", value: "channel_delete,shell" }
+#   access_set { user_id: "user1", key: "risk",       value: "reversible" }
 /access unblock user:<@someone> · /access clear user:<@someone> · /access show [user]
 ```
 
@@ -455,6 +460,31 @@ So the three cases look like this:
 | "can only look for problems" | `risk: read` (or `tools-allow` on the read tools) |
 | "full access, cannot change settings" | `rank: admin` + `commands-deny: config:set,config:reset,model:set,vibe` |
 | "cannot use the bot at all" | `/access block` — no turns, no commands, no approvals |
+
+### The hierarchy
+
+Rank order, and which of it a profile can move:
+
+| Rank | Who | Can it be changed? |
+| --- | --- | --- |
+| 4 — **bot owner** | `OWNER_ID` in `.env` | **no** — set by the deployment, not by any config or profile |
+| 4 — **server owner** | the Discord server's owner, in their own server | **no** — blocking or pinning them does nothing; only the bot owner can edit their profile |
+| 3 — admin | `roles.admin`, or a `rank: admin` pin | yes, by the bot owner or that server's owner |
+| 2 — trusted | `roles.trusted`, or a `rank: trusted` pin | yes, as above |
+| 1 — member | everyone else | yes, as above |
+| 0 — guest / blocked | `access.blocked` | yes, as above |
+
+The top two are structural: `tierOf` reads them **before** blocks and pins, so a server owner cannot demote or
+block the bot owner inside their server, and cannot demote themselves. Everything below is arranged by those two:
+
+- the **bot owner** may do anything anywhere, including pinning someone to `owner`;
+- a **server owner** may arrange their own server's people — tools, commands, risk ceiling, ranks up to `admin`;
+- two writes are refused for everyone else, in the gate (`accessRule`) and in the dashboard
+  (`protectedAccessWrite`): pinning anyone to `owner`, and touching the bot owner's or server owner's own profile;
+- a delegate can never edit an account that already carries a higher rank than the one they hold.
+
+There is no deeper delegation: nobody can create a rank above their own, and `rank` pins are per server, so
+"admin here" is not "admin everywhere".
 
 Precedence is the same everywhere: **blocked beats profile, profile beats guild.** A profile can only tighten
 what the guild already allows, with one exception — an explicit `rank` pin. Blocked accounts read as `guest` for

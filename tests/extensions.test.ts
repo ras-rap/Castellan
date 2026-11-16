@@ -68,8 +68,8 @@ describe('the extension registry', () => {
     expect(capabilityNames.length).toBe(new Set(capabilityNames).size);
   });
 
-  test('the four shipped extensions and their reach', () => {
-    expect(EXTENSIONS.map(extension => extension.id)).toEqual(['discord', 'shell', 'git', 'pterodactyl']);
+  test('the shipped extensions and their reach', () => {
+    expect(EXTENSIONS.map(extension => extension.id)).toEqual(['discord', 'access', 'shell', 'git', 'pterodactyl']);
     expect(setsOf('channel_delete')).toEqual(['discord', 'channels']);
     expect(setsOf('bash')).toEqual(['shell']);
     expect(setsOf('git_push')).toEqual(['git']);

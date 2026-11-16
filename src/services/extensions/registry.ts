@@ -1,5 +1,6 @@
 import { config } from '@services/config.ts';
 
+import { accessExtension } from './access.ts';
 import { discordExtension } from './discord.ts';
 import { gitExtension } from './git.ts';
 import { pterodactylExtension } from './pterodactyl.ts';
@@ -13,7 +14,13 @@ import type { Availability, Extension, ExtensionCapability } from './protocol.ts
  * the codegen writes the model's tool list from it, `/settings` and the dashboard toggle it, and the policy gate
  * classifies it — nothing else has to be touched.
  */
-export const EXTENSIONS: Extension[] = [discordExtension, shellExtension, gitExtension, pterodactylExtension];
+export const EXTENSIONS: Extension[] = [
+  discordExtension,
+  accessExtension,
+  shellExtension,
+  gitExtension,
+  pterodactylExtension,
+];
 
 export type RegisteredCapability = ExtensionCapability & {
   extension: string;

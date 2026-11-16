@@ -1,8 +1,9 @@
 import { accessGuard, guildEnabled, guildOnly } from '@guards/index.ts';
 import { RANK_NAMES, RISK_NAMES, config, guildDefaults } from '@services/config.ts';
+import { readSetting } from '@services/policy/dotted.ts';
 import { ceilingFor } from '@services/policy/hard.ts';
 import { MATRIX_PATH, applySetting, categoriesFor, entriesFor, scopeNote } from '@services/policy/panel.ts';
-import { describeSetting, domainOf, readSetting, settingByPath } from '@services/policy/settings.ts';
+import { describeSetting, domainOf, settingByPath } from '@services/policy/settings.ts';
 import { BRAND_COLOR, EPHEMERAL } from '@utils/constants.ts';
 import { log } from '@utils/logger.ts';
 import {

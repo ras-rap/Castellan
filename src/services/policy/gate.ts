@@ -279,6 +279,9 @@ export async function decide(
     'protectedIds': deps.protectedIds,
     'pterodactyl': guild.pterodactyl,
     'available': name => capabilityAvailability(guildId, name),
+    // the two fixed ranks, and what the per-account rules are now, so a delegate cannot edit above itself
+    ...(member ? { 'actorId': member.id, 'guildOwnerId': member.guild.ownerId } : {}),
+    'access': guild.access,
   });
   if (hard.verdict === 'deny') return asDecision(hard);
   if (capability.risk === 'read') return asDecision(hard);

@@ -1,7 +1,8 @@
 import { accessGuard, guildEnabled, guildOnly, ownerOnly } from '@guards/index.ts';
 import { config, guildDefaults, type GuildSettings, type UserAccess } from '@services/config.ts';
-import { PROFILE_KEYS, parseProfileValue, profilePath, type ProfileKey } from '@services/policy/access.ts';
-import { readSetting, setSetting } from '@services/policy/settings.ts';
+import { parseProfileValue } from '@services/policy/access.ts';
+import { readSetting, setSetting } from '@services/policy/dotted.ts';
+import { PROFILE_KEYS, profilePath, type ProfileKey } from '@services/policy/profile.ts';
 import { BRAND_COLOR, EPHEMERAL } from '@utils/constants.ts';
 import { log } from '@utils/logger.ts';
 import { ApplicationCommandOptionType, EmbedBuilder } from 'discord.js';
