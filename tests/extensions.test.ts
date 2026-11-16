@@ -69,11 +69,19 @@ describe('the extension registry', () => {
   });
 
   test('the shipped extensions and their reach', () => {
-    expect(EXTENSIONS.map(extension => extension.id)).toEqual(['discord', 'access', 'shell', 'git', 'pterodactyl']);
+    expect(EXTENSIONS.map(extension => extension.id)).toEqual([
+      'discord',
+      'access',
+      'shell',
+      'git',
+      'pterodactyl',
+      'memory',
+    ]);
     expect(setsOf('channel_delete')).toEqual(['discord', 'channels']);
     expect(setsOf('bash')).toEqual(['shell']);
     expect(setsOf('git_push')).toEqual(['git']);
     expect(setsOf('ptero_power')).toEqual(['pterodactyl']);
+    expect(setsOf('memory_save')).toEqual(['memory']);
     expect(setsOf('ptero_admin_suspend')).toEqual(['pterodactyl', 'pterodactyl-admin']);
     // an extension id is a set, so `features.tools.disabled: ["pterodactyl"]` covers both halves
     expect(toolListed('ptero_admin_suspend', ['pterodactyl'])).toBe(true);

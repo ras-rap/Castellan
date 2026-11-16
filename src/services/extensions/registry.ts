@@ -3,6 +3,7 @@ import { config } from '@services/config.ts';
 import { accessExtension } from './access.ts';
 import { discordExtension } from './discord.ts';
 import { gitExtension } from './git.ts';
+import { memoryExtension } from './memory.ts';
 import { pterodactylExtension } from './pterodactyl.ts';
 import { shellExtension } from './shell.ts';
 
@@ -20,6 +21,7 @@ export const EXTENSIONS: Extension[] = [
   shellExtension,
   gitExtension,
   pterodactylExtension,
+  memoryExtension,
 ];
 
 export type RegisteredCapability = ExtensionCapability & {

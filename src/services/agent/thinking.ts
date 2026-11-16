@@ -39,6 +39,25 @@ export function parseSummary(text: string): string | undefined {
   return first.length > MAX_SUMMARY ? `${first.slice(0, MAX_SUMMARY - 1)}…` : first;
 }
 
+/**
+ * No model answered (or none is configured): still produce a single short phrase from the reasoning, so the
+ * message reads like a status line instead of a wall. Deterministic on purpose — this path must never depend on
+ * a provider being reachable.
+ */
+export function localSummary(reasoning: string): string {
+  const line =
+    reasoning
+      .split('\n')
+      .map(candidate => candidate.trim())
+      .find(candidate => candidate.length > 0) ?? '';
+  const cleaned = line
+    .replace(/^[#>*\-\s]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const sentence = cleaned.split(/(?<=[.!?])\s/)[0] ?? cleaned;
+  return sentence.length > 70 ? `${sentence.slice(0, 69)}…` : sentence;
+}
+
 export type ThinkingInput = {
   server: OneShotServer;
   guildId: string;

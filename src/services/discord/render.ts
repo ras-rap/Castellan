@@ -1,3 +1,5 @@
+import { localSummary } from '@services/agent/thinking.ts';
+
 import type { Message, TextChannel } from 'discord.js';
 
 const LIMIT = 1990;
@@ -99,10 +101,11 @@ export class StreamRenderer {
     const body = this.buffer.length > 1500 ? `…${this.buffer.slice(-1500)}` : this.buffer;
     const composed = `${body}${status}`.trim();
     if (composed.length > 0) return composed.slice(0, LIMIT);
-    // No answer text yet: show the fast model's one-line summary of the reasoning. The raw reasoning is kept
-    // for the finished log; streaming it live is what made the message edit on every part.
-    if (this.summary.length === 0) return this.preview;
-    return `🧠 ${this.summary}`.slice(0, LIMIT);
+    // No answer text yet: one phrase about what is being worked out. Never the reasoning itself — that is what
+    // made the original message a wall that was re-edited on every part.
+    const phrase = this.summary || localSummary(this.thinkingText());
+    if (phrase.length === 0) return this.preview;
+    return `🧠 ${phrase}`.slice(0, LIMIT);
   }
 
   /** Called on every terminal tool call: the log lists what happened, not each status transition. */
@@ -156,7 +159,9 @@ export class StreamRenderer {
     const header = `🧠 log · ${seconds}s · ${this.steps.length} step${this.steps.length === 1 ? '' : 's'}`;
     const parts = note ? [note, header] : [header];
     if (this.steps.length > 0) parts.push(this.steps.join('\n'));
-    const thinking = this.summary || this.thinkingText().slice(0, 120);
+    // The model's phrase when it answered, a deterministic one-liner otherwise: the raw reasoning is never
+    // quoted here, which is what made the original message look like the model's whole train of thought.
+    const thinking = this.summary || localSummary(this.thinkingText());
     if (thinking.length > 0) parts.push(`> 🧠 ${thinking}`);
     return parts.join('\n\n').slice(0, LIMIT);
   }

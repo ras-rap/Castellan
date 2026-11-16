@@ -253,7 +253,12 @@ ${CLARIFY_DIRECTIVE[features.clarify].join('\n')}
 - Report the outcome first, then the evidence (ids, paths, exit codes).
 ${gitSection(guildId)}${panelSection(guildId)}${switchedOff(disabled, features.extensions.disabled)}
 ## Memory
-\`\`MEMORY.md\`\` in this workspace holds durable facts about this server and its people. Trust it, but prefer
-fresh tool output when the two disagree, and say which one you used.
+\`\`MEMORY.md\`\` is a digest of what this bot remembers about this server and its people; trust it, but prefer
+fresh tool output when the two disagree, and say which one you used. You also own that store through tools:
+- \`memory_search\` before answering anything that sounds like a standing preference, a past decision or "how we
+  do it here" — the digest is truncated at 40 entries, the search is not.
+- \`memory_save\` when the asker states something durable ("we deploy to staging first", "the API key lives in
+  /root/.env"), one sentence, with a stable \`key\` so a later correction replaces it. Never store secrets.
+- \`memory_forget\` a wrong or stale entry rather than arguing with it; \`memory_stats\` to see what is there.
 `;
 }

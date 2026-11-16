@@ -87,16 +87,23 @@ describe('the thinking line', () => {
     expect(calls).toBe(before);
   });
 
-  test('without a summariser the preview stays put instead of streaming reasoning', async () => {
+  test('without a summariser the line shows one deterministic phrase, never the reasoning', async () => {
     jest.useFakeTimers();
     const { channel, edits } = fakeChannel();
     const renderer = new StreamRenderer(channel, '🧠 thinking…');
     await renderer.start();
-    renderer.setReasoning('p1', 'raw thinking that must not be shown');
+    renderer.setReasoning('p1', 'checking the deploy script before touching anything.\nmore raw thinking');
     await drain();
     jest.advanceTimersByTime(1300);
     await drain();
-    expect(edits).toHaveLength(0);
+    expect(edits.at(-1) ?? '').toBe('🧠 checking the deploy script before touching anything.');
+    // and it is one edit, not a re-edit per reasoning part
+    const calls = edits.length;
+    renderer.setReasoning('p1', 'checking the deploy script before touching anything.\nmore raw thinking\nand more');
+    jest.advanceTimersByTime(1300);
+    await drain();
+    expect(edits.length).toBeLessThanOrEqual(calls + 1);
+    expect(edits.at(-1) ?? '').toBe('🧠 checking the deploy script before touching anything.');
   });
 
   test('the finished log quotes the summary, not the chain of thought', async () => {
@@ -124,5 +131,15 @@ describe('the thinking line', () => {
     jest.advanceTimersByTime(1300);
     await drain();
     expect(edits.at(-1)).toContain('here is the answer');
+  });
+
+  test('the local phrase is deterministic and bounded, so no model is needed to stay short', async () => {
+    const { localSummary } = await import('@services/agent/thinking.ts');
+    expect(localSummary('## Plan\n1. read the file\n2. change it')).toBe('Plan');
+    expect(localSummary('checking the deploy script. then the env file')).toBe('checking the deploy script.');
+    expect(localSummary('   ')).toBe('');
+    const long = localSummary('word '.repeat(200));
+    expect(long.length).toBeLessThanOrEqual(70);
+    expect(long.endsWith('…')).toBe(true);
   });
 });

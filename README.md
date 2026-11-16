@@ -205,7 +205,8 @@ Mentioning the bot or replying to one of its messages also starts a task.
    `thinking about how to …` shape (`🧠 thinking about the deploy script`), and the finished log quotes the same
    phrase — the raw chain of thought never reaches Discord. Edits land only when a new summary arrives (at most
    every 4 s, at most 8 per turn); if `fast` is unusable the `primary` model is asked once per turn, and if
-   neither answers the line keeps the last phrase (or the head of the reasoning, capped at 120 characters);
+   neither answers a deterministic one-liner is derived from the first line of the reasoning (≤70 chars, no
+   newlines) — the message is never the transcript, whatever the provider did;
 5. a **round that ends on a failed tool call is continued, not accepted**: the same session is prompted again
    with the error in hand (`🔁 … asking it to finish`), twice at most. That is what turns "Plan confirmed —
    building…" plus a denied `write` into an actual result, or into an answer that says it could not do it;
@@ -233,8 +234,19 @@ server is configured (see [Git server](#git-server-optional)).
 
 ## Memory
 
-Three write paths feed one SQLite store (`memory` + `memory_fts`):
+The store (`memory` + `memory_fts`) is **the agent's own**, behind four tools, so it can look things up and
+decide what to keep instead of only receiving a frozen digest:
 
+| tool | risk | what it does |
+|---|---|---|
+| `memory_search` | read | FTS over this server's memories; an empty query lists the most important |
+| `memory_save` | reversible | store one durable fact, with a stable `key` so a correction replaces it, then rewrite `MEMORY.md` |
+| `memory_forget` | destructive | delete one id (no undo) — for stale or wrong entries |
+| `memory_stats` | read | counts per kind, plus how many entries were superseded |
+
+Four write paths feed it:
+
+- **the tools above** — the agent stores what it is told to keep, mid-turn.
 - **reflection** — after a turn that used tools or asked for something durable, the `fast` role re-reads the turn
   and emits typed JSON (`facts`, `preferences`, `lessons`); entries that look like credentials are dropped
   before they reach the store.

@@ -1,6 +1,7 @@
 # Extensions
 
-An **extension** is one file that owns a set of tools. The bot has four: `discord`, `shell`, `git`, `pterodactyl`.
+An **extension** is one file that owns a set of tools. The bot has six: `discord`, `access`, `shell`, `git`,
+`pterodactyl`, `memory`.
 Adding a fifth is two steps — a file, and one line in the registry:
 
 ```ts
