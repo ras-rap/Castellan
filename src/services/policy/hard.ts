@@ -162,7 +162,7 @@ export function shellRule(command: string): HardDecision | undefined {
 }
 
 /** Tools that write per-account permissions, and so need the delegation rules below. */
-const ACCESS_TOOLS = ['access_set', 'access_block'];
+const ACCESS_TOOLS = ['access_set', 'access_block', 'access_apply'];
 
 /**
  * Who may change whose permissions. The hierarchy is deliberately shallow and its two fixed ranks are not

@@ -428,10 +428,14 @@ because `rank` pins a tier and that grants capability.
 /access set user:<@someone> key:commands-deny value:config:set,config:reset,model:set,vibe
 /access block user:<@someone>                                   # may not use the bot at all
 
-# the agent has the same power, with the same hierarchy rules (access_show / access_set / access_block):
-# "User1 isn't allowed to delete channels or run shell commands, only read and send messages" →
-#   access_set { user_id: "user1", key: "tools-deny", value: "channel_delete,shell" }
-#   access_set { user_id: "user1", key: "risk",       value: "reversible" }
+# the agent has the same power, with the same hierarchy rules, and a plan step for natural language:
+# "User1 isn't allowed to delete channels or run shell commands, only read tools and sending messages"
+#   1. access_plan { user_id: "user1", allow: "messages_fetch,channels_list", deny: "channel_delete,shell", risk: "read" }
+#        → "now: nothing (guild defaults) / proposed: max risk read · tools only … / changes: …"
+#   2. the agent shows that diff and waits for an explicit yes
+#   3. access_apply { user_id: "user1" }  → writes exactly the plan that was shown, once
+# a plan applies once and expires in ten minutes; `access_apply` with no plan is refused, so nothing is written
+# without having been shown first. Single explicit rules still go through access_set / access_block.
 /access unblock user:<@someone> · /access clear user:<@someone> · /access show [user]
 ```
 

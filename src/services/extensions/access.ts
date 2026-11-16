@@ -1,7 +1,8 @@
-import { config, guildDefaults } from '@services/config.ts';
+import { config, guildDefaults, type UserAccess } from '@services/config.ts';
 import { parseProfileValue } from '@services/policy/access.ts';
 import { setSetting } from '@services/policy/dotted.ts';
 import { PROFILE_KEYS, profilePath, type ProfileKey } from '@services/policy/profile.ts';
+import { describeProposal, rememberProposal, takeProposal } from '@services/policy/proposals.ts';
 
 import { requireStr, show, str, type Extension, type ExtensionCapability } from './protocol.ts';
 
@@ -37,6 +38,63 @@ const tools: ExtensionCapability[] = [
       const ids = [...new Set([...access.blocked, ...Object.keys(access.users)])];
       if (ids.length === 0) return 'no per-account permissions here: everyone gets their rank';
       return ids.map(describe).join('\n');
+    },
+  },
+  {
+    'name': 'access_plan',
+    'summary': 'Work out a permission change and show it before applying',
+    'description':
+      'Turn a request like "User1 may only read and send messages" into a concrete profile and return the diff — nothing is written. Show the diff to the asker, get an explicit yes, then call access_apply. Fields you leave out are cleared, which is what "only" means.',
+    'risk': 'read',
+    'params': [
+      { 'name': 'user_id', 'kind': 'string', 'description': 'the account to change', 'required': true },
+      { 'name': 'allow', 'kind': 'string', 'description': 'tools or sets they may use, comma separated' },
+      { 'name': 'deny', 'kind': 'string', 'description': 'tools or sets they may not use, comma separated' },
+      { 'name': 'risk', 'kind': 'string', 'description': 'highest risk class: read, reversible, destructive, admin' },
+      { 'name': 'commands', 'kind': 'string', 'description': 'slash commands they may run, comma separated' },
+    ],
+    'run': async (ctx, args) => {
+      const userId = requireStr(args, 'user_id');
+      const text = (key: string) => str(args, key)?.trim() ?? '';
+      const profile: UserAccess = {
+        'tools': { 'allow': [], 'deny': [] },
+        'commands': { 'allow': [], 'deny': [] },
+      };
+      if (text('allow')) profile.tools.allow = (await parseProfileValue('tools-allow', text('allow'))) as string[];
+      if (text('deny')) profile.tools.deny = (await parseProfileValue('tools-deny', text('deny'))) as string[];
+      if (text('risk')) profile.risk = (await parseProfileValue('risk', text('risk'))) as UserAccess['risk'];
+      if (text('commands'))
+        profile.commands.allow = (await parseProfileValue('commands-allow', text('commands'))) as string[];
+
+      const lines = describeProposal(ctx.guild.id, userId, profile);
+      rememberProposal({ 'guildId': ctx.guild.id, userId, profile, lines, 'at': Date.now() });
+      return [
+        `plan for ${userId} (nothing written yet):`,
+        ...lines,
+        '',
+        'Show this diff and ask for an explicit yes. Then call access_apply with the same user_id.',
+      ].join('\n');
+    },
+  },
+  {
+    'name': 'access_apply',
+    'summary': 'Apply the permission plan that was just shown',
+    'description':
+      'Write the profile produced by access_plan. Refuses when no plan was made in this turn or within ten minutes, so a change cannot be applied without having been shown first.',
+    'risk': 'admin',
+    'params': [
+      { 'name': 'user_id', 'kind': 'string', 'description': 'the account the plan was made for', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const userId = requireStr(args, 'user_id');
+      const proposal = takeProposal(ctx.guild.id, userId);
+      if (!proposal)
+        throw new Error(`no plan for ${userId}: call access_plan first, show the diff, and only then apply it`);
+      const current = config.guild(ctx.guild.id) ?? guildDefaults();
+      config.patchGuild(ctx.guild.id, {
+        ...setSetting(current, `access.users.${userId}`, proposal.profile),
+      });
+      return [`applied for ${userId}:`, ...proposal.lines].join('\n');
     },
   },
   {
