@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { config, paths } from '@services/config.ts';
 import { workspaces } from '@services/database/sqlite.ts';
 import { consoleToken } from '@services/policy/jev.ts';
+import { configHome, ensureGuardPlugin } from '@services/workspace/guard.ts';
 import { provisionWorkspace } from '@services/workspace/provision.ts';
 import { log } from '@utils/logger.ts';
 
@@ -64,6 +65,8 @@ export class Supervisor {
     }
 
     const workspace = provisionWorkspace(guildId, guildName);
+    // The guard plugin lives in the bot's own opencode config dir, so the server picks it up on boot.
+    ensureGuardPlugin();
     const port = await freePort();
     const password = crypto.randomUUID().replaceAll('-', '');
     const proc = Bun.spawn([this.binary, 'serve', '--hostname', config.opencode.host, '--port', String(port)], {
@@ -73,6 +76,8 @@ export class Supervisor {
       'env': {
         ...Bun.env,
         'XDG_DATA_HOME': resolve(paths.data, 'opencode/data'),
+        // Bot-owned config dir: it holds the host-shell guard plugin, and nothing else of the owner's leaks in.
+        'XDG_CONFIG_HOME': configHome(),
         'XDG_STATE_HOME': resolve(paths.data, 'opencode/state'),
         'XDG_CACHE_HOME': resolve(paths.data, 'opencode/cache'),
         'OPENCODE_SERVER_PASSWORD': password,

@@ -149,8 +149,13 @@ The bridge is the only place Discord mutations happen; it re-derives `(guild, ch
 session→channel binding, never from model args, and applies the policy gate per call. A tampered tool file can
 only break itself, and `edit` on `.opencode/**` / `opencode.json` is `deny` in the workspace config.
 
-`bash` shadowing: the same generated file exports a `bash` tool (name collision wins over the builtin) that
-POSTs to `/shell`, which runs the command in the guild's container (`docker exec -w /work`) by default or on
+The shell tool is **not** a shadowed builtin. Measured on the pinned 1.19.5: a tool exported from
+`.opencode/tools/discord.ts` is registered as `discord_<name>`, so an export named `bash` left opencode's own
+`bash` — the host one — fully available beside it, and neither `tools: { bash: false }` nor
+`permission: { bash: "deny" }` removed it (both were tried; the tool ran). So the capability is called `shell`
+(`discord_shell` to the model) and the builtin is refused by the guard plugin written to the bot's own
+`XDG_CONFIG_HOME` — `tool.execute.before` throws for `bash` and for host file tools aimed outside the workspace.
+It POSTs to `/shell`, which runs the command in the guild's container (`docker exec -w /work`) by default or on
 the host when `shell.mode: "host"`. Shell output is capped and returned as the tool result.
 
 ---

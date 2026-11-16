@@ -262,7 +262,7 @@ function argumentRule(
   const panel = pterodactylRule(capability, args, pterodactyl);
   if (panel) return panel;
 
-  if (capability.name === 'bash') {
+  if (capability.name === 'shell') {
     const command = typeof args.command === 'string' ? args.command : '';
     return shellRule(command);
   }

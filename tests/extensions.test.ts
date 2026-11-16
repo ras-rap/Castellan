@@ -78,7 +78,7 @@ describe('the extension registry', () => {
       'memory',
     ]);
     expect(setsOf('channel_delete')).toEqual(['discord', 'channels']);
-    expect(setsOf('bash')).toEqual(['shell']);
+    expect(setsOf('shell')).toEqual(['shell']);
     expect(setsOf('git_push')).toEqual(['git']);
     expect(setsOf('ptero_power')).toEqual(['pterodactyl']);
     expect(setsOf('memory_save')).toEqual(['memory']);
@@ -121,17 +121,17 @@ describe('switching an extension off is one setting, per server', () => {
       'no-shell': { 'enabled': true, 'features': { 'extensions': { 'disabled': ['shell'] } } },
     });
 
-    expect(renderDiscordToolFile('with-shell')).toContain('export const bash');
+    expect(renderDiscordToolFile('with-shell')).toContain('export const shell');
     const stripped = renderDiscordToolFile('no-shell');
-    expect(stripped).not.toContain('export const bash');
+    expect(stripped).not.toContain('export const shell');
     expect(stripped).toContain('export const channel_delete');
 
-    const refused = gate('no-shell', 'bash', { 'command': 'ls' });
+    const refused = gate('no-shell', 'shell', { 'command': 'ls' });
     expect(refused.verdict).toBe('deny');
     expect(refused.layer).toBe('tools');
     expect(refused.reason).toContain('shell extension is switched off');
     // the same call is fine on the server that kept it
-    expect(gate('with-shell', 'bash', { 'command': 'ls' }).verdict).toBe('allow');
+    expect(gate('with-shell', 'shell', { 'command': 'ls' }).verdict).toBe('allow');
   });
 
   test('the setting is validated, offered as a multi-choice, and the persona says what is gone', () => {

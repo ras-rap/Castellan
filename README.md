@@ -226,11 +226,11 @@ Mentioning the bot or replying to one of its messages also starts a task.
 | --- | --- |
 | read | `guild_info`, `channels_list`, `channel_info`, `roles_list`, `member_list`, `member_info`, `messages_fetch`, `git_status` |
 | reversible | `channel_create`, `channel_update` (name/topic/slowmode/nsfw), `channel_move` (category/position), `thread_create`, `thread_update` (archive/lock/rename), `message_send`, `message_pin`, `role_create`, `role_update`, `role_assign`, `invite_create`, `git_commit`, `git_push`, `git_repo_create` |
-| destructive | `channel_delete`, `permission_set` (allow/deny/clear overwrites), `role_delete`, `message_delete`, `member_timeout`, `member_kick`, `member_ban`, `bash` |
+| destructive | `channel_delete`, `permission_set` (allow/deny/clear overwrites), `role_delete`, `message_delete`, `member_timeout`, `member_kick`, `member_ban`, `shell` |
 
 Permission names are validated (`allow: ["ViewChannel"], deny: ["SendMessages"]`), colours must be `#rrggbb`, and
-`bash` is the shadowed builtin that runs through the sandbox. The three `git_*` write tools only appear once a git
-server is configured (see [Git server](#git-server-optional)).
+`shell` (which opencode shows as `discord_shell`) is the only shell — it runs through the guild's sandbox mode.
+The three `git_*` write tools only appear once a git server is configured (see [Git server](#git-server-optional)).
 
 ## Memory
 
@@ -296,7 +296,7 @@ Default ceilings — every cell is overridable per guild with `/config set polic
 
 ### Three layers, strictest wins
 
-Every call — a bridge capability, or the agent server's own `bash`/`edit`/`webfetch` ask — is judged by three
+Every call — a bridge capability, or the agent server's own `edit`/`webfetch` ask — is judged by three
 layers in order. Each returns `allow`, `ask` or `deny`; the pipeline takes the strictest, so no layer can loosen
 what another one refused, and a layer that cannot answer fails to `ask`.
 
@@ -360,7 +360,7 @@ call, Jev is asked how destructive it is and whether an admin would approve:
 | Jev unreachable | asks, unless `policy.vibe.askOnUncertain` is false |
 | otherwise | runs it |
 
-The agent server's own permission asks (`bash`, `edit` outside `repo/`, `webfetch`) go through the same screen,
+The agent server's own permission asks (`edit` outside `repo/`, `webfetch`) go through the same screen,
 and a shell call is classed reversible inside the docker sandbox but destructive in `host` mode. Every
 auto-decision lands in `/audit` with `layer: vibe`, so a refused write is explainable afterwards instead of
 appearing as a bare `✗ write` in the log. Real readings
@@ -428,6 +428,14 @@ refuses; `host` degrades — leave it on `error` unless the whole VPS is trusted
 Host mode is not a bigger sandbox, it is *no* sandbox: the agent's shell runs with the bot's environment, so it
 sees `DISCORD_TOKEN`, the git and panel keys and the console token, and can read anything the bot user can. Keep
 it to servers whose operators you would give a bot-user shell to anyway.
+
+`shell` is also the **only** shell. opencode ships its own `bash` tool, which runs in the server process, on the
+host, next to `.env` — and 1.19.5 ignores `tools: { bash: false }` and `permission: { bash: "deny" }` for it
+(measured: the tool ran either way), so no config key can be trusted to remove it. A plugin hook can: the bot
+writes `castellan-guard.ts` into its own opencode config dir (`XDG_CONFIG_HOME` per spawn), and
+`tool.execute.before` throws for opencode's `bash` — the call never reaches the OS — and for any host file tool
+aimed outside the workspace (`../`, `/etc/...`). The hook is inert without `BRIDGE_TOKEN`, so an opencode you run
+yourself on that machine keeps its own shell.
 
 ### Per-account permissions
 
@@ -522,7 +530,7 @@ when they exist for a guild, and is switched on or off per server — so "add to
 | Extension | Tools | Available when |
 | --- | --- | --- |
 | `discord` | 25 channels/roles/members/messages/threads/invites/permissions tools | always |
-| `shell` | `bash` (the shadowed builtin) | always — the guild's `shell.mode` decides container vs host |
+| `shell` | `shell` (shown to the model as `discord_shell`) | always — the guild's `shell.mode` decides container vs host |
 | `git` | `git_status`, `git_commit`; `git_push`, `git_repo_create` when a forge is configured | as declared per tool |
 | `pterodactyl` | 15 panel tools; the application-API half needs `pterodactyl.admin`, the file trio needs `pterodactyl.files` | a panel key + `pterodactyl.enabled` |
 
@@ -546,11 +554,11 @@ both are re-rendered at provisioning, and `/config set` stops that guild's serve
 `features.tools.disabled` — a comma-separated list of tools and/or sets. A disabled tool is not in the model's
 tool list at all (not described, not offered), and the gate refuses it anyway, so a stale client cannot slip one
 through. Sets: `discord` (everything that talks to Discord), `server`, `channels`, `messages`, `threads`,
-`members`, `roles`, `permissions`, `invites`, `shell` (the sandboxed `bash`), or any single tool name.
+`members`, `roles`, `permissions`, `invites`, `shell` (the sandboxed shell), or any single tool name.
 
 ```
 /config set features.tools.disabled discord     # read-only-ish: no Discord writes at all
-/config set features.tools.disabled shell       # no shell; opencode's builtin bash is denied too
+/config set features.tools.disabled shell       # no shell at all; the guard also refuses opencode's own bash
 /config set features.tools.disabled channels,member_ban
 /config reset features.tools.disabled
 ```
