@@ -63,11 +63,15 @@
     <main>
       <h1>Castellan <span class="muted">control panel</span></h1>
       <div class="row">
+        <div id="user-button"></div>
         <span id="who" class="muted">checking your session…</span>
         <span id="role" class="pill hidden"></span>
-        <button id="signout" class="ghost hidden">sign out</button>
       </div>
       <div id="status" class="status"></div>
+
+      <div id="signin" class="hidden">
+        <div id="signin-mount"></div>
+      </div>
 
       <section id="app" class="hidden">
         <h2>Servers</h2>
@@ -106,21 +110,48 @@
       </section>
     </main>
 
-    <script>window.__CLERK_PUBLISHABLE_KEY__ = '__CLERK_KEY__';</script>
+    <script>
+      // Filled in by the server: the key, and the Frontend API host that key encodes.
+      window.__CLERK__ = { publishableKey: '__CLERK_KEY__', fapi: '__CLERK_FAPI__' };
+    </script>
     <script type="module">
-      // Clerk is loaded from the Frontend API encoded in the publishable key the server was started with.
-      const clerkKey = window.__CLERK_PUBLISHABLE_KEY__ ?? '';
-      let clerk = null;
+      const CLERK = window.__CLERK__ ?? {};
       let token = '';
       let me = null;
       let active = '';
+      let signInMounted = false;
+      let userButtonMounted = false;
 
       const $ = id => document.getElementById(id);
+      const show = id => $(id).classList.remove('hidden');
+      const hide = id => $(id).classList.add('hidden');
       const say = (message, kind = 'muted') => {
         const el = $('status');
         el.textContent = message;
         el.style.color = kind === 'error' ? 'var(--warn)' : 'var(--muted)';
       };
+
+      /** Surfaces every failure on the page instead of leaving "checking your session…" forever. */
+      const fail = error => {
+        say(String(error?.message ?? error), 'error');
+        $('who').textContent = 'not signed in';
+      };
+      window.addEventListener('error', event => fail(event.error ?? event.message));
+      window.addEventListener('unhandledrejection', event => fail(event.reason));
+
+      /** Clerk's own loader pattern: one script tag per bundle, both from the Frontend API host. */
+      function loadScript(src, attributes = {}) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = src;
+          script.async = true;
+          script.crossOrigin = 'anonymous';
+          for (const [name, value] of Object.entries(attributes)) script.setAttribute(name, value);
+          script.onload = resolve;
+          script.onerror = () => reject(new Error(`could not load ${src}`));
+          document.head.append(script);
+        });
+      }
 
       async function api(path, options = {}) {
         const response = await fetch(path, {
@@ -136,18 +167,103 @@
         return body;
       }
 
-      function control(entry) {
-        if (entry.kind === 'boolean') {
-          const select = document.createElement('select');
-          for (const value of ['true', 'false']) {
-            const option = document.createElement('option');
-            option.value = value;
-            option.textContent = value;
-            if (String(entry.value) === value) option.selected = true;
-            select.append(option);
+      /**
+       * The two bundles Clerk documents for a plain HTML page: `@clerk/ui` first, then `@clerk/clerk-js`,
+       * both served by the Frontend API host that the publishable key encodes — not by a CDN of my choosing.
+       * `data-clerk-publishable-key` is what makes the global `Clerk` a ready instance.
+       */
+      async function loadClerk() {
+        // Validate the injected *values*, never compare them to the template tokens: the server replaces those
+        // tokens everywhere in this file, including inside string literals.
+        if (!CLERK.publishableKey?.startsWith('pk_'))
+          throw new Error('CLERK_PUBLISHABLE_KEY is missing or not a Clerk publishable key (pk_test_… / pk_live_…)');
+        if (!/^https?:\/\/[^/]+$/.test(CLERK.fapi ?? ''))
+          throw new Error('could not derive the Clerk Frontend API host from the publishable key');
+        const base = CLERK.fapi.replace(/\/+$/, '');
+        await loadScript(`${base}/npm/@clerk/ui@1/dist/ui.browser.js`);
+        await loadScript(`${base}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, {
+          'data-clerk-publishable-key': CLERK.publishableKey,
+        });
+        if (!window.Clerk?.load) throw new Error('ClerkJS loaded but did not initialise (no global `Clerk`)');
+        await window.Clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+      }
+
+      async function boot() {
+        say('loading Clerk…');
+        await loadClerk();
+        window.Clerk.addListener(() => void refresh().catch(fail));
+        await refresh();
+      }
+
+      /** Runs on load and on every Clerk session change. */
+      async function refresh() {
+        const clerk = window.Clerk;
+        if (!clerk.isSignedIn) {
+          if (!signInMounted) {
+            clerk.mountSignIn($('signin-mount'));
+            signInMounted = true;
           }
-          return select;
+          show('signin');
+          hide('app');
+          hide('detail');
+          hide('role');
+          $('who').textContent = 'not signed in';
+          say('sign in to continue');
+          return;
         }
+
+        hide('signin');
+        if (!userButtonMounted) {
+          clerk.mountUserButton($('user-button'));
+          userButtonMounted = true;
+        }
+        // A session token is a JWT; the server verifies it against Clerk's published keys on every request.
+        token = (await clerk.session?.getToken()) ?? '';
+        if (!token) {
+          say('signed in, but Clerk returned no session token — check the session settings', 'error');
+          return;
+        }
+        try {
+          me = await api('/api/me');
+        } catch (error) {
+          $('who').textContent = clerk.user?.primaryEmailAddress?.emailAddress ?? 'signed in';
+          say(`this account cannot read the dashboard: ${error.message}`, 'error');
+          return;
+        }
+
+        $('who').textContent = me.email ?? 'signed in';
+        const role = $('role');
+        role.className = 'pill ok';
+        role.textContent = me.role === 'owner' ? 'bot owner' : me.role === 'admin' ? 'full access' : 'server owner';
+        show('role');
+        $('scope-note').textContent =
+          me.role === 'guild'
+            ? 'You manage the servers below. Bot-wide settings (shell sandbox, models, git, panel, roles, /enable, approvals bypass) stay with the bot owner.'
+            : 'Full control: every server and every bot-wide setting.';
+        show('app');
+
+        const host = $('guilds');
+        host.replaceChildren();
+        for (const guild of me.guilds) {
+          const button = document.createElement('button');
+          button.className = 'guild';
+          button.dataset.id = guild.id;
+          const name = document.createElement('strong');
+          name.textContent = guild.name;
+          const state = document.createElement('span');
+          state.className = `pill ${guild.enabled ? 'ok' : 'warn'}`;
+          state.textContent = guild.enabled ? 'approved' : 'not approved';
+          button.append(name, state);
+          button.onclick = () => openGuild(guild.id).catch(error => say(String(error.message ?? error), 'error'));
+          host.append(button);
+        }
+        if (me.guilds.length === 0) say('no servers are linked to your account yet');
+        else say('');
+        if (me.guilds.length > 0) await openGuild(me.guilds[0].id);
+      }
+
+      /** One input control per value kind, matching what the setting parser accepts. */
+      function control(entry) {
         if (entry.kind === 'multi' && entry.choices.length > 0) {
           const boxes = document.createElement('span');
           const chosen = new Set(Array.isArray(entry.value) ? entry.value : []);
@@ -165,9 +281,10 @@
           }
           return boxes;
         }
-        if (entry.kind === 'choice' && entry.choices.length > 0) {
+        if ((entry.kind === 'boolean' || (entry.kind === 'choice' && entry.choices.length > 0))) {
           const select = document.createElement('select');
-          for (const value of entry.choices) {
+          const values = entry.kind === 'boolean' ? ['true', 'false'] : entry.choices;
+          for (const value of values) {
             const option = document.createElement('option');
             option.value = value;
             option.textContent = value;
@@ -248,8 +365,9 @@
         }
       }
 
+      /** Extensions are their own switch list: name, tool count, and why it is off if it is. */
       function renderExtensions(extensions) {
-        const host = document.getElementById('extensions');
+        const host = $('extensions');
         host.replaceChildren();
         for (const extension of extensions) {
           const row = document.createElement('div');
@@ -295,82 +413,6 @@
         for (const button of document.querySelectorAll('.guild')) button.dataset.active = String(button.dataset.id === id);
       }
 
-      async function boot() {
-        if (!clerkKey) {
-          say('CLERK_PUBLISHABLE_KEY is not configured on the server, so sign-in is disabled.', 'error');
-          return;
-        }
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
-        script.async = true;
-        script.crossOrigin = 'anonymous';
-        script.onload = async () => {
-          clerk = window.Clerk;
-          await clerk.load({ publishableKey: clerkKey });
-          if (!clerk.user) {
-            clerk.openSignIn({});
-            say('sign in to continue');
-            clerk.addListener(async ({ user }) => {
-              if (user) await signedIn();
-            });
-            return;
-          }
-          await signedIn();
-        };
-        script.onerror = () => say('could not load Clerk from the CDN', 'error');
-        document.head.append(script);
-      }
-
-      async function signedIn() {
-        token = (await clerk.session?.getToken()) ?? '';
-        if (!token) {
-          say('signed in but there is no session token — check the Clerk session settings', 'error');
-          return;
-        }
-        try {
-          me = await api('/api/me');
-        } catch (error) {
-          say('this page is not allowed to read the dashboard', 'error');
-          $('who').textContent = clerk.user?.primaryEmailAddress?.emailAddress ?? '';
-          return;
-        }
-
-        $('who').textContent = me.email ?? 'signed in';
-        const role = $('role');
-        role.className = 'pill ok';
-        role.textContent = me.role === 'owner' ? 'bot owner' : me.role === 'admin' ? 'full access' : 'server owner';
-        role.classList.remove('hidden');
-        $('signout').classList.remove('hidden');
-        $('signout').onclick = async () => {
-          await clerk.signOut();
-          location.reload();
-        };
-        $('scope-note').textContent =
-          me.role === 'guild'
-            ? 'You manage the servers below. Bot-wide settings (shell sandbox, models, git, panel, roles, /enable, approvals bypass) stay with the bot owner.'
-            : 'Full control: every server and every bot-wide setting.';
-        $('app').classList.remove('hidden');
-
-        const host = $('guilds');
-        host.replaceChildren();
-        for (const guild of me.guilds) {
-          const button = document.createElement('button');
-          button.className = 'guild';
-          button.dataset.id = guild.id;
-          const name = document.createElement('strong');
-          name.textContent = guild.name;
-          const state = document.createElement('span');
-          state.className = `pill ${guild.enabled ? 'ok' : 'warn'}`;
-          state.textContent = guild.enabled ? 'approved' : 'not approved';
-          button.append(name, state);
-          button.onclick = () => openGuild(guild.id).catch(error => say(String(error.message ?? error), 'error'));
-          host.append(button);
-        }
-        if (me.guilds.length === 0) say('no servers are linked to your account yet');
-        else say('');
-        if (me.guilds.length > 0) await openGuild(me.guilds[0].id);
-      }
-
       $('access-save').onclick = async () => {
         try {
           const parsed = JSON.parse($('access-json').value);
@@ -381,7 +423,7 @@
         }
       };
 
-      boot();
+      boot().catch(fail);
     </script>
   </body>
 </html>

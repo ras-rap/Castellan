@@ -112,10 +112,13 @@ export function startWeb(input: {
 
       // Unauthenticated liveness only: the proxy and systemd need something to poll, and it says nothing else.
       if (method === 'GET' && url.pathname === '/healthz') return json({ 'ok': true, 'service': 'dashboard' });
-      if (method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html'))
-        return new Response(PAGE.replaceAll('__CLERK_KEY__', input.publishableKey), {
+      if (method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+        // Both values are public: the publishable key, and the Frontend API host it encodes (the issuer).
+        const page = PAGE.replaceAll('__CLERK_KEY__', input.publishableKey).replaceAll('__CLERK_FAPI__', input.issuer);
+        return new Response(page, {
           'headers': { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
         });
+      }
       if (!url.pathname.startsWith('/api/')) return json({ 'error': 'not found' }, 404);
 
       const principal = await principalOf(request, input.issuer);

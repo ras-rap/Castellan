@@ -247,7 +247,18 @@ describe('the dashboard over http', () => {
       expect(page.headers.get('content-type')).toContain('text/html');
       const html = await page.text();
       expect(html).toContain(publishableKey('clerk.test'));
+      expect(html).toContain(ISSUER);
+      // the template tokens are gone after injection — if one survives inside a guard, the page compares a value
+      // to itself and dies with a confusing message (that happened once)
       expect(html).not.toContain('__CLERK_KEY__');
+      expect(html).not.toContain('__CLERK_FAPI__');
+      // and it uses Clerk's documented bundles, served by the Frontend API host — not a CDN of our choosing
+      expect(html).toContain('/npm/@clerk/ui@1/dist/ui.browser.js');
+      expect(html).toContain('/npm/@clerk/clerk-js@6/dist/clerk.browser.js');
+      expect(html).toContain('data-clerk-publishable-key');
+      expect(html).toContain('mountSignIn');
+      expect(html).toContain('mountUserButton');
+      expect(html).not.toContain('jsdelivr');
 
       const nobody = await call('/api/me', {}, tokens.stranger);
       expect(nobody.status).toBe(403);
