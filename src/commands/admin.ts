@@ -20,7 +20,7 @@ export class AdminCommand {
   @Guard(accessGuard, guildOnly)
   async status(interaction: ChatInputCommandInteraction) {
     const { supervisor, runtime } = services.get();
-    const shell = await shellStatus();
+    const shell = await shellStatus(interaction.guildId ?? undefined);
     const servers = supervisor
       .stats()
       .map(entry => `guild ${entry.guildId} · port ${entry.port} · idle ${entry.idleMinutes}m`)
@@ -42,7 +42,11 @@ export class AdminCommand {
         { 'name': 'approvals', 'value': `${approvals.pendingCount()} pending`, 'inline': true },
         {
           'name': 'sandbox',
-          'value': `shell=${shell.mode} · docker=${shell.docker ? 'up' : `down: ${shell.detail.slice(0, 80)}`}`,
+          'value':
+            `shell=**${shell.mode}**` +
+            (shell.mode === 'host'
+              ? ' ⚠️ this server runs commands on the machine, not in a container'
+              : ` · docker=${shell.docker ? 'up' : `down: ${shell.detail.slice(0, 80)}`}`),
           'inline': true,
         },
         {

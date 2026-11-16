@@ -1,4 +1,5 @@
 import { RANK_NAMES, config, guildDefaults, type GuildPolicy } from '@services/config.ts';
+import { shellModeOf } from '@services/workspace/shell.ts';
 import { log } from '@utils/logger.ts';
 
 import {
@@ -322,6 +323,16 @@ export async function decide(
  * agent review may veto, and vibe mode consults Jev. In `ask` mode the human card stays the design — the review
  * can only tighten it.
  */
+/**
+ * What an opencode permission ask is worth. The same `rm` is reversible inside a throwaway container and
+ * destructive on the host, so this reads the guild's own shell mode — the one place that decision is made.
+ */
+export function permissionRisk(guildId: string, permission: string): Risk {
+  if (permission === 'webfetch') return 'reversible';
+  if (permission !== 'bash') return 'destructive';
+  return shellModeOf(guildId) === 'docker' ? 'reversible' : 'destructive';
+}
+
 export async function screenPermission(input: {
   guildId: string;
   tier: Tier;
@@ -339,15 +350,7 @@ export async function screenPermission(input: {
   // one that runs unattended, so that is where the reviewer earns its latency.
   if (policy.mode !== 'vibe') return { 'verdict': 'ask', 'reason': 'policy mode is not vibe' };
 
-  // The same `rm` is reversible inside a throwaway container and destructive on the host.
-  const risk: Risk =
-    input.permission === 'webfetch'
-      ? 'reversible'
-      : input.permission === 'bash'
-        ? guild.shell.mode === 'docker'
-          ? 'reversible'
-          : 'destructive'
-        : 'destructive';
+  const risk = permissionRisk(input.guildId, input.permission);
 
   const screen = jevMode === 'off' ? 'off' : policy.vibe.screen;
   const [opinion, answers] = await Promise.all([

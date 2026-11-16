@@ -393,6 +393,25 @@ capability, rewrite the rank table, or widen what bypasses approval — those ne
 `/config reset` restores the schema default exactly (empty containers included), and every value is validated
 before the write, so a typo leaves the file untouched.
 
+### One sandbox per server, or none
+
+`shell.mode` is a **per-guild** key, so the same bot can run one server with the whole machine and every other
+server in a container:
+
+```
+/config set shell.mode host          # in the server you trust — runs as the bot user, on the VPS itself
+/config set shell.mode docker        # everywhere else: container oda-<guildId>, only that workspace mounted
+```
+
+Each guild's shell container is its own (`oda-<guildId>`), `shellStatus()` and the policy gate resolve the mode
+through the same `shellModeOf()`, so `/status` reports *that server's* mode and a call is classed reversible in a
+container but `destructive` on the host. `shell.fallback` decides what happens when the daemon is down (`error`
+refuses; `host` degrades — leave it on `error` unless the whole VPS is trusted).
+
+Host mode is not a bigger sandbox, it is *no* sandbox: the agent's shell runs with the bot's environment, so it
+sees `DISCORD_TOKEN`, the git and panel keys and the console token, and can read anything the bot user can. Keep
+it to servers whose operators you would give a bot-user shell to anyway.
+
 ### Per-account permissions
 
 Ranks cover groups; `access` covers one Discord account, by user id. It is **bot-owner only** (`/access …`),

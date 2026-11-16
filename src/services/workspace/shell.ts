@@ -97,7 +97,16 @@ async function spawnCaptured(argv: string[], cwd?: string): Promise<ShellOutcome
 /**
  * Shell execution is denied unless it can run sandboxed: docker is the default, host is opt-in per guild
  * (`config/guilds.json`), and `fallback: "error"` keeps a missing docker daemon from silently degrading.
+ *
+ * The mode is per guild, so one server can have the whole machine while every other server stays in a
+ * container. `shellModeOf` is the one place that resolves it, so `/status`, the policy gate and the runner
+ * cannot disagree about which one a guild is on.
  */
+export const shellModeOf = (guildId?: string): 'docker' | 'host' => {
+  const guild = guildId === undefined ? undefined : config.guild(guildId);
+  return { ...config.shellDefaults, ...(guild?.shell ?? {}) }.mode;
+};
+
 export async function runShell(guildId: string, command: string): Promise<string> {
   const guild = config.guild(guildId);
   const shellConfig = { ...config.shellDefaults, ...(guild?.shell ?? {}) };
@@ -130,7 +139,10 @@ export async function runShell(guildId: string, command: string): Promise<string
   return `[docker ${container}] exit=${result.code}\n${result.output}`;
 }
 
-export async function shellStatus(): Promise<{ docker: boolean; detail: string; mode: string }> {
+/** Health plus the mode this guild is actually on (deployment defaults when no guild is given, e.g. `doctor`). */
+export async function shellStatus(
+  guildId?: string,
+): Promise<{ docker: boolean; detail: string; mode: 'docker' | 'host' }> {
   const probe = await dockerUsable();
-  return { 'docker': probe.ok, 'detail': probe.detail, 'mode': config.shellDefaults.mode };
+  return { 'docker': probe.ok, 'detail': probe.detail, 'mode': shellModeOf(guildId) };
 }
