@@ -36,7 +36,7 @@ export class HelpCommand {
     const primary = effectiveModel('primary', interaction.guildId ?? '');
 
     const embed = new EmbedBuilder()
-      .setTitle('open-discord-agent')
+      .setTitle('Castellan')
       .setColor(BRAND_COLOR)
       .setDescription(
         'A coding + server-admin agent in your Discord. Talk to it with `/ask` or by mentioning it; it replies ' +

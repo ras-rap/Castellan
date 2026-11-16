@@ -61,7 +61,7 @@ const stubJwks = (jwks: Jwks) => {
 };
 
 const useGuilds = (guilds: Record<string, unknown>): void => {
-  const dir = mkdtempSync(resolve(tmpdir(), 'oda-web-'));
+  const dir = mkdtempSync(resolve(tmpdir(), 'castellan-web-'));
   tempDirs.push(dir);
   const file = resolve(dir, 'guilds.json');
   writeFileSync(file, JSON.stringify(guilds));

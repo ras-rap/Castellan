@@ -44,16 +44,16 @@ const button = (id: string, label: string, style: ButtonStyle = ButtonStyle.Seco
 const backRow = (category?: string): Row =>
   new ActionRowBuilder<ButtonBuilder>().addComponents(
     category
-      ? button(`oda:set:list:${category}`, '← back')
-      : button('oda:set:root', '← categories', ButtonStyle.Secondary),
-    button('oda:set:root', 'dismiss', ButtonStyle.Danger),
+      ? button(`cst:set:list:${category}`, '← back')
+      : button('cst:set:root', '← categories', ButtonStyle.Secondary),
+    button('cst:set:root', 'dismiss', ButtonStyle.Danger),
   );
 
 /** Root: one select of categories. Everything else is two more clicks from here. */
 export function rootView(userId: string): View {
   const categories = categoriesFor(userId);
   const select = new StringSelectMenuBuilder()
-    .setCustomId('oda:set:cat')
+    .setCustomId('cst:set:cat')
     .setPlaceholder('what do you want to change?')
     .addOptions(
       categories.slice(0, 25).map(category => ({
@@ -113,7 +113,7 @@ export function categoryView(userId: string, guildId: string, category: string):
     'components': [
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
         new StringSelectMenuBuilder()
-          .setCustomId(`oda:set:list:${category}`)
+          .setCustomId(`cst:set:list:${category}`)
           .setPlaceholder('pick a key')
           .addOptions(options),
       ),
@@ -138,7 +138,7 @@ export function settingView(userId: string, guildId: string, path: string): View
   if (domain?.kind === 'multi' && domain.choices) {
     const selected = new Set(listAt(guildId, path));
     const menu = new StringSelectMenuBuilder()
-      .setCustomId(`oda:set:multi:${path}`)
+      .setCustomId(`cst:set:multi:${path}`)
       .setPlaceholder('nothing selected = everything on')
       .setMinValues(0)
       .setMaxValues(Math.min(domain.choices.length, 25))
@@ -150,7 +150,7 @@ export function settingView(userId: string, guildId: string, path: string): View
     result.components.unshift(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu));
   } else if (domain?.kind === 'choice' && domain.choices) {
     const select = new StringSelectMenuBuilder()
-      .setCustomId(`oda:set:val:${path}`)
+      .setCustomId(`cst:set:val:${path}`)
       .setPlaceholder('pick a value')
       .addOptions(
         domain.choices.slice(0, 25).map(choice => ({
@@ -163,15 +163,15 @@ export function settingView(userId: string, guildId: string, path: string): View
   } else if (domain?.kind === 'boolean')
     result.components.unshift(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        button(`oda:set:b:${path}:true`, 'on', value === 'true' ? ButtonStyle.Success : ButtonStyle.Secondary),
-        button(`oda:set:b:${path}:false`, 'off', value === 'false' ? ButtonStyle.Success : ButtonStyle.Secondary),
+        button(`cst:set:b:${path}:true`, 'on', value === 'true' ? ButtonStyle.Success : ButtonStyle.Secondary),
+        button(`cst:set:b:${path}:false`, 'off', value === 'false' ? ButtonStyle.Success : ButtonStyle.Secondary),
       ),
     );
   else {
     result.components.unshift(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        button(`oda:set:edit:${path}`, 'edit…', ButtonStyle.Primary),
-        button(`oda:set:reset:${path}`, 'reset to default'),
+        button(`cst:set:edit:${path}`, 'edit…', ButtonStyle.Primary),
+        button(`cst:set:reset:${path}`, 'reset to default'),
       ),
     );
     result.embeds[0]?.setFooter({ 'text': domain?.placeholder ?? 'free text' });
@@ -179,7 +179,7 @@ export function settingView(userId: string, guildId: string, path: string): View
 
   if (domain?.kind === 'choice' || domain?.kind === 'boolean' || domain?.kind === 'multi')
     result.components.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(button(`oda:set:reset:${path}`, 'reset to default')),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(button(`cst:set:reset:${path}`, 'reset to default')),
     );
 
   return result;
@@ -188,7 +188,7 @@ export function settingView(userId: string, guildId: string, path: string): View
 /** The 20 rank × risk cells, two selects deep instead of one exact dotted path. */
 export function matrixRankView(userId: string, guildId: string): View {
   const select = new StringSelectMenuBuilder()
-    .setCustomId('oda:set:mrank')
+    .setCustomId('cst:set:mrank')
     .setPlaceholder('which rank?')
     .addOptions(
       RANK_NAMES.map(rank => ({
@@ -215,7 +215,7 @@ export function matrixRankView(userId: string, guildId: string): View {
 
 export function matrixRiskView(userId: string, guildId: string, rank: string): View {
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`oda:set:mrisk:${rank}`)
+    .setCustomId(`cst:set:mrisk:${rank}`)
     .setPlaceholder('which risk class?')
     .addOptions(
       RISK_NAMES.map(risk => ({
@@ -275,14 +275,14 @@ export class SettingsCommand {
     await interaction.reply({ ...rootView(interaction.user.id), 'flags': EPHEMERAL });
   }
 
-  @SelectMenuComponent({ 'id': /^oda:set:cat$/ })
+  @SelectMenuComponent({ 'id': /^cst:set:cat$/ })
   async onCategory(interaction: StringSelectMenuInteraction) {
     const category = interaction.values[0] ?? '';
     const panel = categoryView(interaction.user.id, interaction.guildId ?? '', category);
     await interaction.update(panel);
   }
 
-  @SelectMenuComponent({ 'id': /^oda:set:list:/ })
+  @SelectMenuComponent({ 'id': /^cst:set:list:/ })
   async onKey(interaction: StringSelectMenuInteraction) {
     const guildId = interaction.guildId ?? '';
     const [, , , category] = interaction.customId.split(':');
@@ -297,13 +297,13 @@ export class SettingsCommand {
     );
   }
 
-  @SelectMenuComponent({ 'id': /^oda:set:mrank$/ })
+  @SelectMenuComponent({ 'id': /^cst:set:mrank$/ })
   async onMatrixRank(interaction: StringSelectMenuInteraction) {
     const rank = interaction.values[0] ?? '';
     await interaction.update(matrixRiskView(interaction.user.id, interaction.guildId ?? '', rank));
   }
 
-  @SelectMenuComponent({ 'id': /^oda:set:mrisk:/ })
+  @SelectMenuComponent({ 'id': /^cst:set:mrisk:/ })
   async onMatrixRisk(interaction: StringSelectMenuInteraction) {
     const rank = interaction.customId.split(':')[3] ?? '';
     const risk = interaction.values[0] ?? '';
@@ -312,19 +312,19 @@ export class SettingsCommand {
     );
   }
 
-  @SelectMenuComponent({ 'id': /^oda:set:multi:/ })
+  @SelectMenuComponent({ 'id': /^cst:set:multi:/ })
   async onMulti(interaction: StringSelectMenuInteraction) {
-    const path = interaction.customId.slice('oda:set:multi:'.length);
+    const path = interaction.customId.slice('cst:set:multi:'.length);
     await commit(interaction, path, [...interaction.values].join(','));
   }
 
-  @SelectMenuComponent({ 'id': /^oda:set:val:/ })
+  @SelectMenuComponent({ 'id': /^cst:set:val:/ })
   async onValue(interaction: StringSelectMenuInteraction) {
-    const path = interaction.customId.slice('oda:set:val:'.length);
+    const path = interaction.customId.slice('cst:set:val:'.length);
     await commit(interaction, path, interaction.values[0] ?? '');
   }
 
-  @ButtonComponent({ 'id': /^oda:set:/ })
+  @ButtonComponent({ 'id': /^cst:set:/ })
   async onButton(interaction: ButtonInteraction) {
     const [, , action, ...rest] = interaction.customId.split(':');
     const guildId = interaction.guildId ?? '';
@@ -354,7 +354,7 @@ export class SettingsCommand {
         .setMaxLength(600);
       await interaction.showModal(
         new ModalBuilder()
-          .setCustomId(`oda:set:modal:${path}`)
+          .setCustomId(`cst:set:modal:${path}`)
           .setTitle(settingByPath(path)?.description.slice(0, 45) ?? 'edit setting')
           .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input) as never),
       );
@@ -374,9 +374,9 @@ export class SettingsCommand {
     await interaction.reply({ 'content': 'unknown control', 'flags': EPHEMERAL });
   }
 
-  @ModalComponent({ 'id': /^oda:set:modal:/ })
+  @ModalComponent({ 'id': /^cst:set:modal:/ })
   async onModal(interaction: ModalSubmitInteraction) {
-    const path = interaction.customId.slice('oda:set:modal:'.length);
+    const path = interaction.customId.slice('cst:set:modal:'.length);
     await commit(interaction, path, interaction.fields.getTextInputValue('value'));
   }
 }

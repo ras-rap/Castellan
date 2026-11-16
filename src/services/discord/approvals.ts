@@ -77,9 +77,9 @@ export async function requestApproval(input: ApprovalRequest): Promise<ApprovalO
     .setFooter({ 'text': `${input.kind} · requested by ${input.actorId} · expires in ${Math.round(ttl / 1000)}s` });
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`oda:ap:${id}:allow`).setLabel('Allow once').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`oda:ap:${id}:always`).setLabel('Always').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`oda:ap:${id}:deny`).setLabel('Reject').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`cst:ap:${id}:allow`).setLabel('Allow once').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`cst:ap:${id}:always`).setLabel('Always').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`cst:ap:${id}:deny`).setLabel('Reject').setStyle(ButtonStyle.Danger),
   );
 
   const waiter: Waiter = { resolve };

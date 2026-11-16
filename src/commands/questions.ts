@@ -21,7 +21,7 @@ const optionsOf = (questions: QuestionInfo[], questionIndex: number): QuestionIn
 @Discord()
 export class QuestionComponents {
   /** One button per option; the custom id carries the option so the label never has to be re-parsed. */
-  @ButtonComponent({ 'id': /^oda:q:/ })
+  @ButtonComponent({ 'id': /^cst:q:/ })
   async onOption(interaction: ButtonInteraction) {
     const [, , requestId, questionIndexRaw, optionIndexRaw] = interaction.customId.split(':');
     const entry = requestId ? getPending(requestId) : undefined;
@@ -52,7 +52,7 @@ export class QuestionComponents {
     else await refreshQuestionCard(requestId);
   }
 
-  @SelectMenuComponent({ 'id': /^oda:qs:/ })
+  @SelectMenuComponent({ 'id': /^cst:qs:/ })
   async onSelect(interaction: StringSelectMenuInteraction) {
     const [, , requestId, questionIndexRaw] = interaction.customId.split(':');
     const entry = requestId ? getPending(requestId) : undefined;
@@ -77,7 +77,7 @@ export class QuestionComponents {
     else await refreshQuestionCard(requestId);
   }
 
-  @ButtonComponent({ 'id': /^oda:qc:/ })
+  @ButtonComponent({ 'id': /^cst:qc:/ })
   async onCancel(interaction: ButtonInteraction) {
     const [, , requestId] = interaction.customId.split(':');
     const entry = requestId ? getPending(requestId) : undefined;

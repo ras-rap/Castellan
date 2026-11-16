@@ -20,7 +20,7 @@ const useEnv = (key: string, value: string | undefined): void => {
 };
 
 const useProviders = (contents: unknown): void => {
-  const dir = mkdtempSync(resolve(tmpdir(), 'oda-providers-'));
+  const dir = mkdtempSync(resolve(tmpdir(), 'castellan-providers-'));
   tempDirs.push(dir);
   const file = resolve(dir, 'providers.json');
   writeFileSync(file, JSON.stringify(contents));

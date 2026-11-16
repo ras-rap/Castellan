@@ -15,7 +15,7 @@ const isDecision = (value: string): value is Decision => (DECISIONS as readonly 
 
 @Discord()
 export class ApprovalButton {
-  @ButtonComponent({ 'id': /^oda:ap:/ })
+  @ButtonComponent({ 'id': /^cst:ap:/ })
   async handle(interaction: ButtonInteraction) {
     const [, , approvalId, decision] = interaction.customId.split(':');
     if (!approvalId || !decision || !isDecision(decision)) {

@@ -30,7 +30,7 @@ export class AdminCommand {
     const fast = effectiveModel('fast', interaction.guildId ?? '');
     const providers = readyProviderIds();
     const embed = new EmbedBuilder()
-      .setTitle('open-discord-agent')
+      .setTitle('Castellan')
       .setColor(BRAND_COLOR)
       .addFields(
         { 'name': 'servers', 'value': servers || 'none running', 'inline': false },

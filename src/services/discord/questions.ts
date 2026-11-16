@@ -67,7 +67,7 @@ const componentsFor = (entry: PendingQuestion): ActionRowBuilder<ButtonBuilder |
     if (question.options.length <= 5) {
       const buttons = question.options.map((option, optionIndex) =>
         new ButtonBuilder()
-          .setCustomId(`oda:q:${entry.requestId}:${questionIndex}:${optionIndex}`)
+          .setCustomId(`cst:q:${entry.requestId}:${questionIndex}:${optionIndex}`)
           .setLabel(option.label.slice(0, 80))
           .setStyle(ButtonStyle.Secondary),
       );
@@ -75,7 +75,7 @@ const componentsFor = (entry: PendingQuestion): ActionRowBuilder<ButtonBuilder |
       return;
     }
     const select = new StringSelectMenuBuilder()
-      .setCustomId(`oda:qs:${entry.requestId}:${questionIndex}`)
+      .setCustomId(`cst:qs:${entry.requestId}:${questionIndex}`)
       .setPlaceholder(question.header?.slice(0, 100) ?? 'Choose an answer')
       .setMinValues(1)
       .setMaxValues(question.multiple ? Math.min(question.options.length, 10) : 1)
@@ -92,7 +92,7 @@ const componentsFor = (entry: PendingQuestion): ActionRowBuilder<ButtonBuilder |
   if (rows.length < MAX_ROWS)
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(`oda:qc:${entry.requestId}`).setLabel('Cancel').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`cst:qc:${entry.requestId}`).setLabel('Cancel').setStyle(ButtonStyle.Danger),
       ),
     );
 

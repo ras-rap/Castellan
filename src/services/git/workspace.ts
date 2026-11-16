@@ -8,7 +8,7 @@ import { authedRemote, redact, resolveForge } from './forge.ts';
 
 const logger = log('git');
 
-const GIT_IDENTITY = ['-c', 'user.email=agent@open-discord-agent', '-c', 'user.name=open-discord-agent'];
+const GIT_IDENTITY = ['-c', 'user.email=agent@castellan.local', '-c', 'user.name=castellan'];
 
 /** `Bun.spawnSync` does not always resolve bare names from PATH on Windows, so the binary is located first. */
 const gitBinary = (): string | undefined => Bun.which('git') ?? undefined;

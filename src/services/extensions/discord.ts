@@ -282,7 +282,7 @@ const tools: ExtensionCapability[] = [
       const kind = str(args, 'type') ?? 'text';
       const name = requireStr(args, 'name');
       const parent = str(args, 'parent_id') ?? undefined;
-      const reason = `requested by ${ctx.actorId} via open-discord-agent`;
+      const reason = `requested by ${ctx.actorId} via castellan`;
       const common = { name, parent, reason };
       const created =
         kind === 'voice'
@@ -317,7 +317,7 @@ const tools: ExtensionCapability[] = [
       const thread = await channel.threads.create({
         'name': requireStr(args, 'name'),
         'startMessage': str(args, 'message_id') ?? undefined,
-        'reason': `requested by ${ctx.actorId} via open-discord-agent`,
+        'reason': `requested by ${ctx.actorId} via castellan`,
       });
       return `created thread ${thread.id} (${thread.name})`;
     },
@@ -353,8 +353,8 @@ const tools: ExtensionCapability[] = [
       const roleId = requireStr(args, 'role_id');
       if (roleId === ctx.guild.id) throw new Error('@everyone cannot be assigned');
       const add = args.add !== false;
-      if (add) await member.roles.add(roleId, `requested by ${ctx.actorId} via open-discord-agent`);
-      else await member.roles.remove(roleId, `requested by ${ctx.actorId} via open-discord-agent`);
+      if (add) await member.roles.add(roleId, `requested by ${ctx.actorId} via castellan`);
+      else await member.roles.remove(roleId, `requested by ${ctx.actorId} via castellan`);
       return `${add ? 'added' : 'removed'} role ${roleId} ${add ? 'to' : 'from'} ${member.user.username}`;
     },
   },
@@ -370,10 +370,7 @@ const tools: ExtensionCapability[] = [
     'run': async (ctx, args) => {
       const member = await resolveMember(ctx.guild, requireStr(args, 'user_id'));
       const minutes = Math.min(Math.max(num(args, 'minutes') ?? 0, 0), 40320);
-      await member.timeout(
-        minutes === 0 ? null : minutes * 60_000,
-        `requested by ${ctx.actorId} via open-discord-agent`,
-      );
+      await member.timeout(minutes === 0 ? null : minutes * 60_000, `requested by ${ctx.actorId} via castellan`);
       return minutes === 0
         ? `cleared timeout for ${member.user.username}`
         : `timed out ${member.user.username} for ${minutes} minutes`;
@@ -394,7 +391,7 @@ const tools: ExtensionCapability[] = [
     'run': async (ctx, args) => {
       const channel = ctx.guild.channels.cache.get(requireStr(args, 'channel_id'));
       if (!channel) throw new Error('channel not found in this guild');
-      const reason = `requested by ${ctx.actorId} via open-discord-agent`;
+      const reason = `requested by ${ctx.actorId} via castellan`;
       const changed: string[] = [];
       const name = str(args, 'name');
       const topic = str(args, 'topic');
@@ -443,7 +440,7 @@ const tools: ExtensionCapability[] = [
     'run': async (ctx, args) => {
       const channel = ctx.guild.channels.cache.get(requireStr(args, 'channel_id'));
       if (!channel || !('setPosition' in channel)) throw new Error('channel not found or cannot be repositioned');
-      const reason = `requested by ${ctx.actorId} via open-discord-agent`;
+      const reason = `requested by ${ctx.actorId} via castellan`;
       const parent = str(args, 'parent_id');
       const position = num(args, 'position');
       if (parent !== undefined) await channel.setParent(parent === 'none' ? null : parent, { 'reason': reason });
@@ -465,7 +462,7 @@ const tools: ExtensionCapability[] = [
       const channel = ctx.guild.channels.cache.get(requireStr(args, 'channel_id'));
       if (!channel) throw new Error('channel not found in this guild');
       const name = channel.name;
-      await channel.delete(`requested by ${ctx.actorId} via open-discord-agent`);
+      await channel.delete(`requested by ${ctx.actorId} via castellan`);
       return `deleted channel #${name} (${args.channel_id})`;
     },
   },
@@ -487,7 +484,7 @@ const tools: ExtensionCapability[] = [
       if (!channel || !('permissionOverwrites' in channel))
         throw new Error('channel not found or has no permission overwrites');
       const targetId = requireStr(args, 'target_id');
-      const reason = `requested by ${ctx.actorId} via open-discord-agent`;
+      const reason = `requested by ${ctx.actorId} via castellan`;
       const target = ctx.guild.roles.cache.get(targetId)
         ? `role @${ctx.guild.roles.cache.get(targetId)?.name}`
         : `member ${targetId}`;
@@ -525,7 +522,7 @@ const tools: ExtensionCapability[] = [
         'hoist': args.hoist === true,
         'mentionable': args.mentionable === true,
         'permissions': permissionNames(strArray(args, 'permissions')),
-        'reason': `requested by ${ctx.actorId} via open-discord-agent`,
+        'reason': `requested by ${ctx.actorId} via castellan`,
       });
       return `created role @${created.name} (${created.id}) color=${created.hexColor}`;
     },
@@ -547,7 +544,7 @@ const tools: ExtensionCapability[] = [
       const role = ctx.guild.roles.cache.get(requireStr(args, 'role_id'));
       if (!role) throw new Error('role not found in this guild');
       if (role.managed) throw new Error(`@${role.name} is managed by an integration and cannot be edited`);
-      const reason = `requested by ${ctx.actorId} via open-discord-agent`;
+      const reason = `requested by ${ctx.actorId} via castellan`;
       const changed: string[] = [];
       const name = str(args, 'name');
       const color = str(args, 'color');
@@ -589,7 +586,7 @@ const tools: ExtensionCapability[] = [
       if (!role) throw new Error('role not found in this guild');
       if (role.managed) throw new Error(`@${role.name} is managed by an integration and cannot be deleted`);
       const name = role.name;
-      await role.delete(`requested by ${ctx.actorId} via open-discord-agent`);
+      await role.delete(`requested by ${ctx.actorId} via castellan`);
       return `deleted role @${name} (${args.role_id})`;
     },
   },
@@ -606,7 +603,7 @@ const tools: ExtensionCapability[] = [
     ],
     'run': async (ctx, args) => {
       const thread = resolveThread(ctx.guild, requireStr(args, 'thread_id'));
-      const reason = `requested by ${ctx.actorId} via open-discord-agent`;
+      const reason = `requested by ${ctx.actorId} via castellan`;
       const changed: string[] = [];
       if (typeof args.archived === 'boolean') {
         await thread.setArchived(args.archived, reason);
@@ -659,7 +656,7 @@ const tools: ExtensionCapability[] = [
       const invite = await channel.createInvite({
         'maxAge': Math.max(num(args, 'max_age') ?? 86_400, 0),
         'maxUses': Math.max(num(args, 'max_uses') ?? 0, 0),
-        'reason': `requested by ${ctx.actorId} via open-discord-agent`,
+        'reason': `requested by ${ctx.actorId} via castellan`,
       });
       return `invite https://discord.gg/${invite.code} for #${channel.name} expires=${invite.expiresAt?.toISOString() ?? 'never'} maxUses=${invite.maxUses}`;
     },
@@ -676,7 +673,7 @@ const tools: ExtensionCapability[] = [
     'run': async (ctx, args) => {
       const member = await resolveMember(ctx.guild, requireStr(args, 'user_id'));
       const name = member.user.username;
-      await member.kick(str(args, 'reason') ?? `requested by ${ctx.actorId} via open-discord-agent`);
+      await member.kick(str(args, 'reason') ?? `requested by ${ctx.actorId} via castellan`);
       return `kicked ${name} (${member.id})`;
     },
   },
@@ -701,7 +698,7 @@ const tools: ExtensionCapability[] = [
       const seconds = Math.min(Math.max(num(args, 'delete_message_seconds') ?? 0, 0), 604_800);
       await member.ban({
         'deleteMessageSeconds': seconds,
-        'reason': str(args, 'reason') ?? `requested by ${ctx.actorId} via open-discord-agent`,
+        'reason': str(args, 'reason') ?? `requested by ${ctx.actorId} via castellan`,
       });
       return `banned ${name} (${member.id}) deletedMessages=${seconds}s`;
     },

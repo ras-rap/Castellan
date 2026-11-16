@@ -1,4 +1,4 @@
-# open-discord-agent
+# Castellan
 
 A Discord-native agent that answers in chat **and acts** — creates channels, reads the member list, manages
 roles, writes code — on an opencode backend. Any model from any provider it is given a credential for: the
@@ -400,10 +400,10 @@ server in a container:
 
 ```
 /config set shell.mode host          # in the server you trust — runs as the bot user, on the VPS itself
-/config set shell.mode docker        # everywhere else: container oda-<guildId>, only that workspace mounted
+/config set shell.mode docker        # everywhere else: container castellan-<guildId>, only that workspace mounted
 ```
 
-Each guild's shell container is its own (`oda-<guildId>`), `shellStatus()` and the policy gate resolve the mode
+Each guild's shell container is its own (`castellan-<guildId>`), `shellStatus()` and the policy gate resolve the mode
 through the same `shellModeOf()`, so `/status` reports *that server's* mode and a call is classed reversible in a
 container but `destructive` on the host. `shell.fallback` decides what happens when the daemon is down (`error`
 refuses; `host` degrades — leave it on `error` unless the whole VPS is trusted).
@@ -552,7 +552,7 @@ edit outside `repo/` still asks a human.
 
 **Commits are written, not optional.** `commitWorkspace` (`src/services/git/workspace.ts`) runs after every turn,
 after every learned-skill write and at provisioning, with the bot's own identity
-(`open-discord-agent <agent@open-discord-agent>`). The workspace `AGENTS.md` says so in a `## Git` section, so the
+(`castellan <agent@castellan.local>`). The workspace `AGENTS.md` says so in a `## Git` section, so the
 agent knows its edits are snapshotted and that it may add an explicit commit of its own (`git_commit`) — it never
 needs to commit to make edits safe, and `/undo` depends on that history existing.
 
@@ -693,9 +693,9 @@ The dashboard is off unless `WEB_PORT` and `CLERK_PUBLISHABLE_KEY` are both set 
 ## Ops (Linux VM)
 
 ```bash
-sudo cp deploy/oda.service /etc/systemd/system/oda.service
-sudo systemctl enable --now oda
-journalctl -u oda -f          # expect "runtime ready" and, if configured, "dashboard listening"
+sudo cp deploy/castellan.service /etc/systemd/system/castellan.service
+sudo systemctl enable --now castellan
+journalctl -u castellan -f          # expect "runtime ready" and, if configured, "dashboard listening"
 ```
 
 ### Putting the dashboard on a VPS

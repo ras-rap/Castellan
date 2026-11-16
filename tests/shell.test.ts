@@ -13,7 +13,7 @@ const GUILD_HOST = `test-host-${Date.now().toString(36)}`;
 const GUILD_DOCKER = `test-docker-${Date.now().toString(36)}`;
 
 const useGuilds = (guilds: Record<string, unknown>): void => {
-  const dir = mkdtempSync(resolve(tmpdir(), 'oda-shell-'));
+  const dir = mkdtempSync(resolve(tmpdir(), 'castellan-shell-'));
   tempDirs.push(dir);
   const file = resolve(dir, 'guilds.json');
   writeFileSync(file, JSON.stringify(guilds));

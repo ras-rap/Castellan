@@ -107,7 +107,7 @@ async function main(): Promise<void> {
       'channelId': channel.id,
       'shell': (command: string) => runShell(guild.id, command),
     };
-    const name = `oda-e2e-${Date.now().toString(36)}`;
+    const name = `castellan-e2e-${Date.now().toString(36)}`;
     let created: string | undefined;
     try {
       const createOut = await capabilityByName('channel_create').run(ctx, {

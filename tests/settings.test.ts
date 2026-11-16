@@ -21,7 +21,7 @@ const tempDirs: string[] = [];
 const savedGuildsFile = process.env.GUILDS_FILE;
 
 const useGuilds = (guilds: Record<string, unknown>): void => {
-  const dir = mkdtempSync(resolve(tmpdir(), 'oda-panel-'));
+  const dir = mkdtempSync(resolve(tmpdir(), 'castellan-panel-'));
   tempDirs.push(dir);
   const file = resolve(dir, 'guilds.json');
   writeFileSync(file, JSON.stringify(guilds));
@@ -135,7 +135,7 @@ describe('panel views', () => {
 
     const text = settingView('someone', GUILD, 'shell.image');
     const textIds = buttonIds(text);
-    expect(textIds).toContain('oda:set:edit:shell.image');
+    expect(textIds).toContain('cst:set:edit:shell.image');
   });
 
   test('the matrix takes a rank, then a risk, and lands on the right cell', () => {

@@ -36,7 +36,7 @@ async function dockerUsable(): Promise<DockerProbe> {
 
 /** One long-lived container per guild so `apt-get install` style state survives between commands. */
 async function ensureContainer(guildId: string, image: string, workspace: string): Promise<string> {
-  const name = `oda-${guildId}`;
+  const name = `castellan-${guildId}`;
   const inspect = Bun.spawn(['docker', 'inspect', '-f', '{{.State.Running}}', name], {
     'stdout': 'pipe',
     'stderr': 'pipe',
@@ -60,7 +60,7 @@ async function ensureContainer(guildId: string, image: string, workspace: string
       '-v',
       `${resolve(workspace)}:/work`,
       '--label',
-      'open-discord-agent=1',
+      'castellan=1',
       image,
       'sleep',
       'infinity',

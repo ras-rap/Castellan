@@ -304,7 +304,7 @@ async function main(): Promise<void> {
 
     /** Writes under the line the value already uses, so an alias never gains a canonical twin. */
     const lineKey = (key: string) => resolved[key]?.lineKey ?? key;
-    logger.info('open-discord-agent setup', { 'envFile': envPath });
+    logger.info('castellan setup', { 'envFile': envPath });
 
     const token = await ask(rl, 'Discord bot token (Bot tab → Reset/Copy)', existing.DISCORD_TOKEN ?? undefined);
     if (token.length === 0) throw new Error('a Discord token is required: create one in the Dev Portal → Bot tab');

@@ -15,7 +15,7 @@ const tempDirs: string[] = [];
 const savedGuildsFile = process.env.GUILDS_FILE;
 
 const useGuilds = (guilds: Record<string, unknown>): void => {
-  const dir = mkdtempSync(resolve(tmpdir(), 'oda-git-'));
+  const dir = mkdtempSync(resolve(tmpdir(), 'castellan-git-'));
   tempDirs.push(dir);
   const file = resolve(dir, 'guilds.json');
   writeFileSync(file, JSON.stringify(guilds));
@@ -104,7 +104,7 @@ describe('forge requests', () => {
 describe('workspace commits and pushes', () => {
   const GUILD = `test-git-${Date.now().toString(36)}`;
   const workspace = resolve(paths.workspaces, GUILD);
-  const remote = resolve(tmpdir(), `oda-remote-${Date.now().toString(36)}.git`);
+  const remote = resolve(tmpdir(), `castellan-remote-${Date.now().toString(36)}.git`);
 
   const cleanup = () => {
     if (existsSync(workspace)) rmSync(workspace, { 'recursive': true, 'force': true });
@@ -125,7 +125,7 @@ describe('workspace commits and pushes', () => {
       expect(status).toContain('server: forgejo https://git.test');
 
       // a local bare repository stands in for the server: the push itself is real git
-      mkdtempSync(resolve(tmpdir(), 'oda-remote-'));
+      mkdtempSync(resolve(tmpdir(), 'castellan-remote-'));
       git(tmpdir(), ['init', '--bare', '-q', remote]);
       git(workspace, ['remote', 'add', 'origin', `file://${remote.replaceAll('\\', '/')}`]);
 

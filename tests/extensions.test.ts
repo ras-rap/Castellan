@@ -24,7 +24,7 @@ const tempDirs: string[] = [];
 const savedGuildsFile = process.env.GUILDS_FILE;
 
 const useGuilds = (guilds: Record<string, unknown>): void => {
-  const dir = mkdtempSync(resolve(tmpdir(), 'oda-ext-'));
+  const dir = mkdtempSync(resolve(tmpdir(), 'castellan-ext-'));
   tempDirs.push(dir);
   const file = resolve(dir, 'guilds.json');
   writeFileSync(file, JSON.stringify(guilds));
