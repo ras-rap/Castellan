@@ -71,6 +71,7 @@ export class StreamRenderer {
   /** The fast model's one-line description of what is being worked out; replaces the raw reasoning live. */
   private summary = '';
   private summarising = false;
+  private summaryPromise?: Promise<void>;
   private summaries = 0;
   private lastSummaryAt = 0;
   private lastSummaryLength = 0;
@@ -131,7 +132,7 @@ export class StreamRenderer {
     this.summarising = true;
     this.lastSummaryAt = Date.now();
     this.lastSummaryLength = thinking.length;
-    void this.summarise(thinking)
+    this.summaryPromise = this.summarise(thinking)
       .then(summary => {
         if (summary && summary !== this.summary) {
           this.summary = summary;
@@ -146,23 +147,17 @@ export class StreamRenderer {
   }
 
   /**
-   * The finished log: header, steps, then the chain of thought as a blockquote. Discord caps a message at 2000
-   * characters, so the thinking is what gets trimmed — steps are the part that answers "what did it do".
+   * The finished log: header, steps, then the one-line summary as a blockquote. The raw chain of thought stays in
+   * the session where it belongs — quoting it here is what made the message a wall of thinking that kept being
+   * re-edited.
    */
   private logContent(note?: string): string {
     const seconds = Math.max(1, Math.round(this.elapsed / 1000));
     const header = `🧠 log · ${seconds}s · ${this.steps.length} step${this.steps.length === 1 ? '' : 's'}`;
     const parts = note ? [note, header] : [header];
     if (this.steps.length > 0) parts.push(this.steps.join('\n'));
-
-    const thinking = this.thinkingText();
-    if (thinking.length > 0) {
-      const used = parts.join('\n').length;
-      const budget = LIMIT - used - 16;
-      const quoted = thinking.length > budget ? `…${thinking.slice(-budget)}` : thinking;
-      parts.push(`> ${quoted.split('\n').join('\n> ')}`);
-    }
-
+    const thinking = this.summary || this.thinkingText().slice(0, 120);
+    if (thinking.length > 0) parts.push(`> 🧠 ${thinking}`);
     return parts.join('\n\n').slice(0, LIMIT);
   }
 
@@ -212,6 +207,8 @@ export class StreamRenderer {
     }
     this.closed = true;
     this.stop();
+    // A turn can end before the summary lands; give the in-flight call a moment so the log is not silent.
+    if (this.summarising && this.summaryPromise) await Promise.race([this.summaryPromise, Bun.sleep(2500)]);
 
     const body = [options.note, finalText.trim() || this.buffer.trim() || '(no output)'].filter(Boolean).join('\n\n');
     const prefix = options.mentionId ? `<@${options.mentionId}> ` : '';

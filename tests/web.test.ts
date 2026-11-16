@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { config } from '@services/config.ts';
+import { sessions } from '@services/database/sqlite.ts';
 import { services } from '@services/discord/services.ts';
 import { authenticate, clearJwksCache, issuerFromPublishableKey, verifyJwt, type Jwks } from '@services/web/auth.ts';
 import {
@@ -264,7 +265,14 @@ describe('the dashboard over http', () => {
       'client': {
         'guilds': {
           'cache': new Map([
-            ['111', { 'name': 'Alpha', 'ownerId': 'discord-owner-id' }],
+            [
+              '111',
+              {
+                'name': 'Alpha',
+                'ownerId': 'discord-owner-id',
+                'channels': { 'cache': new Map([['chan-1', { 'name': 'general' }]]) },
+              },
+            ],
             ['222', { 'name': 'Beta', 'ownerId': 'someone-else' }],
           ]),
         },
@@ -354,6 +362,45 @@ describe('the dashboard over http', () => {
           )
         ).status,
       ).toBe(403);
+    } finally {
+      remove();
+      server.stop(true);
+    }
+  });
+
+  test('conversations: the guild’s sessions, and a transcript that says why it cannot load', async () => {
+    const remove = withWebConfig({
+      'owners': ['boss@example.com'],
+      'admins': [],
+      'links': { 'user_discord_owner': 'discord-owner-id' },
+      'guilds': {},
+    });
+    const { server, call, tokens } = await boot();
+    try {
+      sessions.set({
+        'chat_key': '111:chan-1',
+        'guild_id': '111',
+        'channel_id': 'chan-1',
+        'session_id': 'ses_web_probe',
+        'actor_id': 'user-a',
+      });
+      const list = await call('/api/guilds/111/sessions', {}, tokens.owner);
+      expect(list.status).toBe(200);
+      expect((list.body.sessions as Array<{ sessionId: string; channelName?: string }>).map(s => s.sessionId)).toEqual([
+        'ses_web_probe',
+      ]);
+      // the channel name comes from the live client
+      expect((list.body.sessions as Array<{ channelName?: string }>)[0]?.channelName).toBe('general');
+
+      // the agent server is idle, so the transcript explains itself instead of erroring
+      const transcript = await call('/api/guilds/111/sessions/ses_web_probe', {}, tokens.owner);
+      expect(transcript.status).toBe(200);
+      expect(String(transcript.body.unavailable)).toContain('not running');
+
+      // another guild's owner cannot read it, and a session from elsewhere is not served under this guild
+      expect((await call('/api/guilds/222/sessions', {}, tokens.guild)).status).toBe(403);
+      const other = await call('/api/guilds/222/sessions/ses_web_probe', {}, tokens.owner);
+      expect(String(other.body.unavailable)).toContain('not in this server');
     } finally {
       remove();
       server.stop(true);

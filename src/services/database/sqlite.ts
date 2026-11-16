@@ -137,6 +137,8 @@ export type ChatSessionRow = {
   channel_id: string;
   session_id: string;
   actor_id: string | null;
+  created_at: number;
+  updated_at: number;
 };
 
 export const sessions = {
@@ -159,6 +161,13 @@ export const sessions = {
   'touch': (chatKey: string) =>
     db.query('UPDATE chat_sessions SET updated_at = ? WHERE chat_key = ?').run(Date.now(), chatKey),
   'count': () => db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM chat_sessions').get()?.n ?? 0,
+  /** Sessions in one guild, newest activity first — the dashboard's conversation list. */
+  'byGuild': (guildId: string, limit = 50) =>
+    db
+      .query<ChatSessionRow, [string, number]>(
+        'SELECT * FROM chat_sessions WHERE guild_id = ? ORDER BY updated_at DESC LIMIT ?',
+      )
+      .all(guildId, limit),
 };
 
 export type ApprovalRow = {

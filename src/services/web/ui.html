@@ -175,6 +175,32 @@
       .status { font-size: 12px; color: var(--muted); min-height: 18px; }
       .status.error { color: var(--err); }
       .empty { padding: 26px 14px; text-align: center; color: var(--muted); font-size: 13px; }
+      .pending {
+        position: sticky; top: 56px; z-index: 4; display: flex; align-items: center; gap: 10px;
+        margin: 0 0 12px; padding: 9px 12px; border-radius: var(--radius);
+        background: var(--accent-dim); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+        font-size: 12.5px;
+      }
+      tr:has(input[data-dirty]) td.key { color: var(--accent); }
+      tr:has(input[data-dirty]) td.key::after { content: ' •'; }
+      .convo { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 16px; }
+      @media (max-width: 980px) { .convo { grid-template-columns: 1fr; } }
+      .session {
+        display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+        background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+        padding: 9px 12px; text-align: left; color: var(--fg); cursor: pointer; font: inherit;
+      }
+      .session:last-child { border-bottom: 0; }
+      .session:hover { background: var(--surface-2); }
+      .session[aria-current='true'] { background: var(--accent-dim); }
+      .session span { font-size: 11px; }
+      .turn { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+      .turn:last-child { border-bottom: 0; }
+      .turn .who { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); padding-top: 2px; }
+      .turn .said { white-space: pre-wrap; font-size: 13px; }
+      .turn.assistant .who { color: var(--accent); }
+      .turn.tool .said { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); }
+      .turn.tool.failed .said { color: var(--err); }
       .grid-2 { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
       .ext { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
       .ext p { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
@@ -230,8 +256,15 @@
               <button id="tab-settings" role="tab" aria-current="true">Settings</button>
               <button id="tab-extensions" role="tab">Extensions</button>
               <button id="tab-access" role="tab">Access</button>
+              <button id="tab-conversations" role="tab">Conversations</button>
             </div>
 
+            <div id="pending" class="pending hidden">
+              <span id="pending-count">0 unsaved changes</span>
+              <div class="spacer"></div>
+              <button id="pending-discard" class="ghost">discard</button>
+              <button id="pending-save" class="primary">save all</button>
+            </div>
             <div id="pane-settings"><div id="groups"></div></div>
 
             <div id="pane-extensions" class="hidden">
@@ -243,6 +276,19 @@
                   it is the same list as <span class="mono">features.extensions.disabled</span>.
                 </p>
               </section>
+            </div>
+
+            <div id="pane-conversations" class="hidden">
+              <div class="convo">
+                <section>
+                  <h3>Sessions</h3>
+                  <div id="sessions" class="card"></div>
+                </section>
+                <section>
+                  <h3 id="transcript-title">Transcript</h3>
+                  <div id="transcript" class="card"><div class="empty">pick a session</div></div>
+                </section>
+              </div>
             </div>
 
             <div id="pane-access" class="hidden">
@@ -353,11 +399,20 @@
       async function boot() {
         say('loading Clerk…');
         await loadClerk();
-        window.Clerk.addListener(() => void refresh().catch(fail));
+        // Clerk re-emits on every token refresh (~60 s). That must only refresh the token: re-rendering here is
+        // what jumped the page back to the first server and threw away half-edited rows.
+        window.Clerk.addListener(() =>
+          void (async () => {
+            token = (await window.Clerk.session?.getToken()) ?? token;
+            if (!me) await refresh();
+          })().catch(fail),
+        );
         await refresh();
       }
 
       /** Runs on load and on every Clerk session change. */
+      let renderedFor = '';
+
       async function refresh() {
         const clerk = window.Clerk;
         if (!clerk.isSignedIn) {
@@ -394,6 +449,9 @@
           return;
         }
 
+        const identity = me.email ?? me.role;
+        const firstRender = identity !== renderedFor;
+        renderedFor = identity;
         $('who').textContent = me.email ?? 'signed in';
         const role = $('role');
         role.className = `pill ${me.role === 'guild' ? 'accent' : 'ok'}`;
@@ -423,17 +481,42 @@
         $('nav-empty').classList.toggle('hidden', me.guilds.length > 0);
         if (me.guilds.length === 0) say('no servers are linked to your account yet');
         else say('');
-        if (me.guilds.length > 0) await openGuild(me.guilds[0].id);
+        // Re-rendering the list is fine; re-opening a guild would discard unsaved edits, so only the first
+        // render (or a switch to a different account) navigates.
+        if (firstRender && me.guilds.length > 0) await openGuild(me.guilds[0].id);
+        else if (active && !me.guilds.some(guild => guild.id === active)) await openGuild(me.guilds[0].id);
       }
 
       function selectTab(tab) {
-        for (const name of ['settings', 'extensions', 'access']) {
+        for (const name of ['settings', 'extensions', 'access', 'conversations']) {
           $(`tab-${name}`).setAttribute('aria-current', String(name === tab));
           $(`pane-${name}`).classList.toggle('hidden', name !== tab);
         }
+        if (tab === 'conversations') void loadSessions();
       }
-      for (const name of ['settings', 'extensions', 'access'])
+      for (const name of ['settings', 'extensions', 'access', 'conversations'])
         $(`tab-${name}`).onclick = () => selectTab(name);
+
+      /** Unsaved edits, by setting path → the raw string the API expects. One row saves while others stay dirty. */
+      const pending = new Map();
+
+      const refreshPendingUi = () => {
+        const bar = $('pending');
+        bar.classList.toggle('hidden', pending.size === 0);
+        $('pending-count').textContent = `${pending.size} unsaved change${pending.size === 1 ? '' : 's'}`;
+      };
+
+      const markDirty = (path, raw, input) => {
+        pending.set(path, raw);
+        input.dataset.dirty = 'true';
+        refreshPendingUi();
+      };
+
+      const rawOf = input => {
+        const boxes = [...input.querySelectorAll('input[type="checkbox"]')];
+        if (boxes.length > 0) return boxes.filter(box => box.checked).map(box => box.value).join(',');
+        return Array.isArray(input.value) ? input.value.join(',') : input.value;
+      };
 
       /** One input control per value kind, matching what the setting parser accepts. */
       function control(entry) {
@@ -498,6 +581,9 @@
             const value = document.createElement('td');
             const input = control(entry);
             input.disabled = !entry.editable;
+            // every control feeds the pending map as you type, so nothing depends on pressing save per row
+            input.addEventListener('input', () => markDirty(entry.path, rawOf(input), input));
+            input.addEventListener('change', () => markDirty(entry.path, rawOf(input), input));
             value.append(input);
             const hint = document.createElement('div');
             hint.className = 'why';
@@ -513,17 +599,15 @@
             save.onclick = async () => {
               save.disabled = true;
               try {
-                const boxes = [...input.querySelectorAll('input[type="checkbox"]')];
-                const raw = boxes.length
-                  ? boxes.filter(box => box.checked).map(box => box.value).join(',')
-                  : Array.isArray(input.value)
-                    ? input.value.join(',')
-                    : input.value;
+                const raw = pending.get(entry.path) ?? rawOf(input);
                 await api(`/api/guilds/${active}`, { method: 'PATCH', body: JSON.stringify({ path: entry.path, raw }) });
+                pending.delete(entry.path);
+                delete input.dataset.dirty;
+                refreshPendingUi();
                 say(`saved ${entry.path}`);
-                await openGuild(active);
               } catch (error) {
                 say(String(error.message ?? error), 'error');
+              } finally {
                 save.disabled = false;
               }
             };
@@ -571,7 +655,74 @@
         }
       }
 
+      /** The guild's conversations: a list on the left, one transcript on the right. Read-only. */
+      async function loadSessions() {
+        const host = $('sessions');
+        host.replaceChildren();
+        let list = [];
+        try {
+          list = (await api(`/api/guilds/${active}/sessions`)).sessions ?? [];
+        } catch (error) {
+          host.innerHTML = `<div class="empty">${error.message ?? error}</div>`;
+          return;
+        }
+        if (list.length === 0) {
+          host.innerHTML = '<div class="empty">no conversations yet</div>';
+          return;
+        }
+        for (const session of list) {
+          const row = document.createElement('button');
+          row.className = 'session';
+          const where = document.createElement('strong');
+          where.textContent = `#${session.channelName ?? session.channelId}`;
+          const when = document.createElement('span');
+          when.className = 'muted';
+          when.textContent = new Date(session.updatedAt).toLocaleString();
+          row.append(where, when);
+          row.onclick = () => void openTranscript(session);
+          host.append(row);
+        }
+        await openTranscript(list[0]);
+      }
+
+      async function openTranscript(session) {
+        const host = $('transcript');
+        $('transcript-title').textContent = `Transcript · #${session.channelName ?? session.channelId}`;
+        host.innerHTML = '<div class="empty">loading…</div>';
+        for (const button of document.querySelectorAll('#sessions .session'))
+          button.setAttribute('aria-current', String(button.textContent?.includes(session.channelName ?? session.channelId) ?? false));
+        let body;
+        try {
+          body = await api(`/api/guilds/${active}/sessions/${encodeURIComponent(session.sessionId)}`);
+        } catch (error) {
+          host.innerHTML = `<div class="empty">${error.message ?? error}</div>`;
+          return;
+        }
+        host.replaceChildren();
+        if (body.unavailable) {
+          host.innerHTML = `<div class="empty">${body.unavailable}</div>`;
+          return;
+        }
+        for (const entry of body.entries) {
+          const line = document.createElement('div');
+          line.className = `turn ${entry.role}${entry.status === 'error' ? ' failed' : ''}`;
+          const who = document.createElement('span');
+          who.className = 'who';
+          who.textContent = entry.role === 'tool' ? 'tool' : entry.role;
+          const said = document.createElement('span');
+          said.className = 'said';
+          said.textContent = entry.text;
+          line.append(who, said);
+          host.append(line);
+        }
+        if (body.entries.length === 0) host.innerHTML = '<div class="empty">empty session</div>';
+      }
+
       async function openGuild(id) {
+        if (id !== active && pending.size > 0) {
+          pending.clear();
+          refreshPendingUi();
+        }
         active = id;
         const detail = await api(`/api/guilds/${id}`);
         $('title').textContent = detail.guild.name ?? id;
@@ -598,6 +749,30 @@
         for (const button of document.querySelectorAll('#nav-guilds .guild'))
           button.setAttribute('aria-current', String(button.dataset.id === id));
       }
+
+      $('pending-save').onclick = async () => {
+        const entries = [...pending.entries()];
+        let saved = 0;
+        for (const [path, raw] of entries) {
+          try {
+            await api(`/api/guilds/${active}`, { method: 'PATCH', body: JSON.stringify({ path, raw }) });
+            pending.delete(path);
+            saved += 1;
+          } catch (error) {
+            say(`${path}: ${error.message ?? error}`, 'error');
+          }
+        }
+        for (const input of document.querySelectorAll('#groups [data-dirty]')) delete input.dataset.dirty;
+        refreshPendingUi();
+        say(saved === entries.length ? `saved ${saved} change(s)` : `saved ${saved} of ${entries.length}`);
+        if (saved === entries.length) await openGuild(active);
+      };
+
+      $('pending-discard').onclick = async () => {
+        pending.clear();
+        await openGuild(active);
+        say('discarded');
+      };
 
       $('access-save').onclick = async () => {
         try {

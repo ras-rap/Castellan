@@ -4,8 +4,8 @@ import { askOnce, type OneShotServer } from './oneshot.ts';
 
 const logger = log('thinking');
 
-/** One line, not a paragraph: this replaces a 700-character tail in a Discord message. */
-const MAX_SUMMARY = 180;
+/** One short phrase, not a sentence: it sits on the progress line and in the finished log. */
+const MAX_SUMMARY = 110;
 
 /**
  * The prompt for the cheap model. It sees only the reasoning text, and is told to describe what the agent is
@@ -13,9 +13,10 @@ const MAX_SUMMARY = 180;
  */
 export const thinkingPrompt = (text: string): string =>
   [
-    'Summarise the reasoning below in ONE short line (max 140 characters), present tense, for a live progress log.',
-    'Say what is being worked out or attempted, not how. No preamble, no quotes, no trailing punctuation.',
-    'Reply with the line only.',
+    'Describe what the assistant is doing as one short phrase, the way a status line reads.',
+    'Shape: "thinking about how to <goal>", "checking <what>", "working out <what>" — max 60 characters.',
+    'A gerund phrase, lowercase after the first word, no quotes, no trailing period, no preamble.',
+    'Reply with the phrase only.',
     '',
     'Reasoning:',
     text.slice(-4000),
@@ -33,7 +34,7 @@ export function parseSummary(text: string): string | undefined {
     .map(line => line.replace(/^(summary|thinking|line)\s*[:\-—]\s*/i, ''))
     .map(line => line.replace(/^["'“”](.*)["'“”]$/, '$1').trim())
     .filter(line => line.length > 0);
-  const first = cleaned[0];
+  const first = cleaned[0]?.replace(/[.。]+$/, '');
   if (!first) return undefined;
   return first.length > MAX_SUMMARY ? `${first.slice(0, MAX_SUMMARY - 1)}…` : first;
 }

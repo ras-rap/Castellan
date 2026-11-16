@@ -39,20 +39,23 @@ afterEach(() => {
 describe('the thinking line', () => {
   test('the prompt asks for one line and carries only the tail of the reasoning', () => {
     const prompt = thinkingPrompt(`HEAD-MARKER${'x'.repeat(5000)}WORKING-ON-AUTH`);
-    expect(prompt).toContain('ONE short line');
+    expect(prompt).toContain('one short phrase');
+    expect(prompt).toContain('thinking about how to');
     expect(prompt).toContain('WORKING-ON-AUTH');
     // the context stays honest: the tail is sent, the beginning of a long pass is not
     expect(prompt).not.toContain('HEAD-MARKER');
-    expect(prompt.length).toBeLessThan(4300);
+    expect(prompt.length).toBeLessThan(4400);
   });
 
   test('a chatty reply is reduced to one clean line', () => {
-    expect(parseSummary('Summary: tracing the missing channel id')).toBe('tracing the missing channel id');
+    expect(parseSummary('Summary: thinking about the missing channel')).toBe('thinking about the missing channel');
+    // a trailing period is not part of the phrase
+    expect(parseSummary('checking role permissions.')).toBe('checking role permissions');
     expect(parseSummary('```\nchecking role permissions\n```')).toBe('checking role permissions');
     expect(parseSummary('"reading the config"')).toBe('reading the config');
     expect(parseSummary('\n\n  comparing two candidates  \nsecond line')).toBe('comparing two candidates');
     expect(parseSummary('   ')).toBeUndefined();
-    expect(parseSummary('x'.repeat(400))?.length).toBeLessThanOrEqual(180);
+    expect(parseSummary('x'.repeat(400))?.length).toBeLessThanOrEqual(110);
   });
 
   test('raw reasoning never reaches the live message', async () => {
@@ -94,6 +97,21 @@ describe('the thinking line', () => {
     jest.advanceTimersByTime(1300);
     await drain();
     expect(edits).toHaveLength(0);
+  });
+
+  test('the finished log quotes the summary, not the chain of thought', async () => {
+    const { channel, edits, sent } = fakeChannel();
+    const renderer = new StreamRenderer(channel, '🧠 thinking…', async () => 'thinking about the deploy script');
+    await renderer.start();
+    renderer.setReasoning('p1', 'RAW-THOUGHT-ONE '.repeat(30));
+    await drain();
+    await renderer.finish('the answer', { 'reasoning': 'RAW-THOUGHT-FINAL '.repeat(30) });
+    const log = edits.at(-1) ?? '';
+    // the answer is its own message; the log is the progress message, and it quotes the summary
+    expect(sent.join('\n')).toContain('the answer');
+    expect(log).toContain('> 🧠 thinking about the deploy script');
+    // the wall of thinking is not in Discord at all
+    expect(log).not.toContain('RAW-THOUGHT');
   });
 
   test('answer text still streams; only the thinking is summarised', async () => {

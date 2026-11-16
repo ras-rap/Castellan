@@ -22,6 +22,7 @@ import {
   visibleGuilds,
   type Principal,
 } from './principals.ts';
+import { listSessions, readTranscript } from './transcript.ts';
 
 import type { GuildSettings } from '@services/config.ts';
 import type { Server as BunServer } from 'bun';
@@ -177,6 +178,17 @@ export function startWeb(input: {
           'botWide': [...BOT_WIDE_PATHS, ...BOT_WIDE_PREFIXES.map(prefix => `${prefix}*`)],
           'guilds': guilds.filter(guild => visible.includes(guild.id)),
         });
+      }
+
+      // conversations: the guild's sessions, and one transcript from the guild's own agent server
+      const sessionMatch = /^\/api\/guilds\/(\d+)\/sessions(?:\/([^/]+))?$/.exec(url.pathname);
+      if (method === 'GET' && sessionMatch) {
+        const guildId = sessionMatch[1] ?? '';
+        if (!visible.includes(guildId))
+          return json({ 'error': 'forbidden', 'detail': 'this account does not manage that server' }, 403);
+        const sessionId = sessionMatch[2];
+        if (!sessionId) return json({ 'sessions': listSessions(guildId) });
+        return json(await readTranscript(guildId, decodeURIComponent(sessionId)));
       }
 
       const guildMatch = /^\/api\/guilds\/(\d+)(\/access)?$/.exec(url.pathname);

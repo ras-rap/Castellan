@@ -201,10 +201,11 @@ Mentioning the bot or replying to one of its messages also starts a task.
    alone;
 3. approval cards are removed the moment they are decided, expired, or the turn ends — the record stays in
    `/audit` instead of in the channel;
-4. while the agent reasons, the live line shows a **one-line summary from the `fast` model** (`🧠 …`), not the
-   raw chain of thought — the stream is re-edited only when a new summary lands (at most every 4 s, at most 8 per
-   turn), instead of on every reasoning part. If `fast` is unusable here, the `primary` model is asked once per
-   turn; if neither answers, the line simply stays put. The full reasoning still lands in the finished log;
+4. while the agent reasons, the live line shows a **one-phrase summary from the `fast` model**, in the
+   `thinking about how to …` shape (`🧠 thinking about the deploy script`), and the finished log quotes the same
+   phrase — the raw chain of thought never reaches Discord. Edits land only when a new summary arrives (at most
+   every 4 s, at most 8 per turn); if `fast` is unusable the `primary` model is asked once per turn, and if
+   neither answers the line keeps the last phrase (or the head of the reasoning, capped at 120 characters);
 5. a **round that ends on a failed tool call is continued, not accepted**: the same session is prompted again
    with the error in hand (`🔁 … asking it to finish`), twice at most. That is what turns "Plan confirmed —
    building…" plus a denied `write` into an actual result, or into an answer that says it could not do it;
@@ -721,9 +722,13 @@ How it is built:
 - `services/web/server.ts` — `GET /api/me`, `GET /api/guilds/:id`, `PATCH /api/guilds/:id`,
   `GET|PUT /api/guilds/:id/access`; every request re-verifies the token and every write goes through the same
   `applySetting` the Discord commands use, with `actor: web:<email>` in the log.
-- `services/web/ui.html` — one page, no build step: guild list, settings grouped by category with the control that
-  matches the value type (checkbox/select/text), bot-wide rows disabled with the reason, and a JSON box for
-  per-account access profiles.
+- `services/web/ui.html` — one page, no build step: sidebar of servers, four tabs per server, settings grouped by
+  category with the control that matches the value type, bot-wide rows disabled with the reason, a JSON box for
+  per-account access profiles, and **Conversations** — the guild's sessions with a readable transcript (user,
+  assistant, one line per tool call; the model's reasoning is not shown).
+- Edits accumulate: change any number of rows and press **save all** (or save one row on its own), the bar counts
+  what is unsaved, and a Clerk token refresh no longer re-navigates or reloads anything — it only refreshes the
+  token.
 
 The dashboard is off unless `WEB_PORT` and `CLERK_PUBLISHABLE_KEY` are both set (`startWebFromEnv` returns
 `undefined` and logs why). It binds `0.0.0.0` — put it behind the same TLS reverse proxy as anything else.

@@ -58,8 +58,9 @@ describe('stream renderer', () => {
     expect(log).toContain('2 steps');
     expect(log).toContain('✓ `channels_list`');
     expect(log).toContain('✗ `bash`');
-    expect(log).toContain('> authoritative reasoning');
-    // The live reasoning was a prefix of the authoritative part, so it must not be duplicated.
+    // The log quotes the *summary*. Without a summariser it falls back to the head of the reasoning, never the
+    // whole chain of thought: quoting all of it is what made the message a wall that kept being edited.
+    expect(log).toContain('> 🧠 authoritative reasoning');
     expect(log).not.toContain('first thought, extended');
   });
 
@@ -71,10 +72,10 @@ describe('stream renderer', () => {
 
     const log = state.edited.at(-1) ?? '';
     expect(log).toContain('0 steps');
-    expect(log).toContain('> nine sheep survive');
+    expect(log).toContain('> 🧠 nine sheep survive');
   });
 
-  test('a long chain of thought is trimmed to fit one Discord message', async () => {
+  test('a long chain of thought never becomes a wall in the log', async () => {
     const { channel, state } = fakeChannel();
     const renderer = new StreamRenderer(channel, '🧠 thinking…');
     await renderer.start();
@@ -84,7 +85,10 @@ describe('stream renderer', () => {
     const log = state.edited.at(-1) ?? '';
     expect(log.length).toBeLessThanOrEqual(1990);
     expect(log).toContain('✓ `tool_11`');
-    expect(log).toContain('…');
+    // the fallback line is the head of the reasoning only: 4 000 words of thinking stay in the session
+    const quoted = log.split('> 🧠 ')[1] ?? '';
+    expect(quoted.length).toBeLessThanOrEqual(130);
+    expect(log).not.toContain('thought '.repeat(40));
   });
 
   test('a timeout note is explained above the partial output, still mentioning the asker', async () => {
