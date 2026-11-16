@@ -51,6 +51,8 @@ export const PTERO_BASE_URL = optional('PTERO_BASE_URL');
  * Frontend API host), so no second URL is needed. The email lists are additive to `config/web.json`.
  */
 export const WEB_PORT = Number(optional('WEB_PORT') ?? 0);
+/** Loopback by default: the dashboard is meant to sit behind a TLS proxy on the same host. */
+export const WEB_HOST = optional('WEB_HOST') ?? '127.0.0.1';
 export const CLERK_PUBLISHABLE_KEY = optional('CLERK_PUBLISHABLE_KEY');
 export const WEB_OWNER_EMAILS = optional('WEB_OWNER_EMAILS');
 export const WEB_ADMIN_EMAILS = optional('WEB_ADMIN_EMAILS');

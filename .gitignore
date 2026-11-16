@@ -7,3 +7,4 @@ config/guilds.json
 logs/
 dist/
 config/providers.json
+config/web.json

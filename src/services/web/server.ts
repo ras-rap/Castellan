@@ -6,7 +6,7 @@ import { services } from '@services/discord/services.ts';
 import { extensionStatus } from '@services/extensions/registry.ts';
 import { applySetting } from '@services/policy/panel.ts';
 import { SETTINGS, describeSetting, domainOf, readSetting } from '@services/policy/settings.ts';
-import { CLERK_PUBLISHABLE_KEY, WEB_PORT } from '@utils/env.ts';
+import { CLERK_PUBLISHABLE_KEY, WEB_HOST, WEB_PORT } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 
 import { authenticate, issuerFromPublishableKey } from './auth.ts';
@@ -94,13 +94,21 @@ async function principalOf(request: Request, issuer: string): Promise<Principal 
  * write path the Discord commands use. Every `/api` request re-verifies the token; nothing is trusted because
  * a previous request was.
  */
-export function startWeb(input: { port: number; issuer: string; publishableKey: string }): WebServer {
+export function startWeb(input: {
+  port: number;
+  issuer: string;
+  publishableKey: string;
+  /** Loopback by default: put a TLS proxy in front rather than exposing the port. */
+  hostname?: string;
+}): WebServer {
   return Bun.serve({
     'port': input.port,
-    'hostname': '0.0.0.0',
+    'hostname': input.hostname ?? '127.0.0.1',
     async fetch(request) {
       const url = new URL(request.url);
 
+      // Unauthenticated liveness only: the proxy and systemd need something to poll, and it says nothing else.
+      if (request.method === 'GET' && url.pathname === '/healthz') return json({ 'ok': true, 'service': 'dashboard' });
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html'))
         return new Response(PAGE.replaceAll('__CLERK_KEY__', input.publishableKey), {
           'headers': { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
@@ -210,10 +218,11 @@ export function startWebFromEnv(): WebServer | undefined {
     logger.warn('WEB_PORT is set but CLERK_PUBLISHABLE_KEY is missing or unreadable; dashboard disabled');
     return undefined;
   }
-  const server = startWeb({ 'port': WEB_PORT, issuer, publishableKey });
+  const server = startWeb({ 'port': WEB_PORT, issuer, publishableKey, 'hostname': WEB_HOST });
   logger.info('dashboard listening', {
+    'host': WEB_HOST,
     'port': server.port ?? WEB_PORT,
-    'issuer': issuer,
+    issuer,
     'botWide': BOT_WIDE_PREFIXES,
   });
   return server;

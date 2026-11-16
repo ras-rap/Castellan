@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=opencode
 WorkingDirectory=/opt/open-discord-agent
-ExecStart=/home/opencode/.bun/bin/bun run src/index.ts
+ExecStart=/home/opencode/.bun/bin/bun run src/main.ts
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production

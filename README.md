@@ -695,8 +695,55 @@ The dashboard is off unless `WEB_PORT` and `CLERK_PUBLISHABLE_KEY` are both set 
 ```bash
 sudo cp deploy/oda.service /etc/systemd/system/oda.service
 sudo systemctl enable --now oda
-journalctl -u oda -f
+journalctl -u oda -f          # expect "runtime ready" and, if configured, "dashboard listening"
 ```
+
+### Putting the dashboard on a VPS
+
+1. **Clerk**: create an application, copy the *publishable* key (`pk_test_…` for a dev instance, `pk_live_…` for a
+   production one). Add the dashboard's origin (`https://bot.example.com`) to Clerk's allowed origins. Nothing
+   secret is needed on the server — Clerk signs the session, the bot verifies it against the issuer's JWKS.
+2. **`.env`**:
+
+   ```bash
+   WEB_PORT=8080
+   WEB_HOST=127.0.0.1            # default; the TLS proxy is the way in
+   CLERK_PUBLISHABLE_KEY=pk_test_…
+   WEB_OWNER_EMAILS=you@example.com
+   WEB_ADMIN_EMAILS=             # people you hand the same rights
+   ```
+
+   `WEB_HOST` and `WEB_PORT` are the only network knobs. `WEB_HOST=0.0.0.0` exists for "proxy on another box";
+   otherwise leave it on loopback and do not open the port in the firewall.
+3. **`config/web.json`** (not committed; `config/web.example.json` is the template) links Clerk identities to
+   Discord accounts so server owners are recognised, and can name extra people per guild:
+
+   ```json
+   { "owners": [], "admins": [],
+     "links": { "user_2abc…": "123456789012345678" },
+     "guilds": { "1568699998957211688": ["mod@example.com"] } }
+   ```
+
+   Matching is against the Clerk user id (`user_…`) **or** the email claim — the id always works; `email` only
+   works if your Clerk session token includes it (Sessions → session token → add `email`). Emails are
+   lower-cased before comparing.
+4. **TLS proxy** — one Caddy block is enough:
+
+   ```
+   bot.example.com {
+       reverse_proxy 127.0.0.1:8080
+   }
+   ```
+
+   `GET /healthz` answers `{"ok":true,"service":"dashboard"}` without a session, for the proxy and for uptime
+   checks. Everything else needs a Bearer session token, and every request re-verifies it.
+
+What people see is decided by `config/web.json`, not by Clerk roles: the bot owner and listed admins get every
+server and every bot-wide setting, a linked Discord owner gets their own server (once `/enable` has approved it),
+and anyone else gets `403 your account has no permissions here` — which is the normal, intended answer.
+
+Two things that surprise people: a server must be **approved** (`enabled`) before its owner can change anything,
+and the Discord owner link reads the bot's guild cache, so restart the bot after it joins a new server.
 
 - Data lives in `.data/` (SQLite `agent.db`, workspaces, console token, opencode runtime dirs). Snapshot it with
   `bun run commands backup` (`VACUUM INTO .data/backups/…`, keeps the last 14) — safer than copying a live DB.
