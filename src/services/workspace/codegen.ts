@@ -226,10 +226,17 @@ const panelSection = (guildId?: string): string => {
       : 'The allow-list is empty, so every server the panel key can see is reachable — name the exact server in every call.';
   return `\n## Pterodactyl panel
 ${scope}
-- Reads (\`ptero_servers\`, \`ptero_server\`) are free; \`ptero_power\`/\`ptero_command\` stop or type into a live server.
-${settings.files ? '- `ptero_files`/`ptero_file_read`/`ptero_file_write` exist here: writing a file is not undoable, so say which file before you do it.' : '- The file tools are off here: do not offer to edit files on a panel server.'}
+- Reads are free: \`ptero_servers\`/\`ptero_server\` for state and usage, \`ptero_activity\` for who did what, and
+  \`ptero_backups\`/\`ptero_schedules\`/\`ptero_startup\`/\`ptero_allocations\` for the rest of the server.
+- \`ptero_power\` stops a live server and \`ptero_command\` types into its console; both need the server running.
+- \`ptero_console\` is a live window, not a log: it attaches, listens for a few seconds and reports what was written.
+  When you need history, read the log files instead.
+${settings.files ? '- The file tools exist here: `ptero_files`/`ptero_file_read`/`ptero_file_write` plus upload, download links, pulls from a URL, delete, rename, mkdir, compress, decompress, chmod and copy. Writing, deleting, extracting and pulling are not undoable — name the path and the server before you act.' : '- The file tools are off here: do not offer to edit files on a panel server.'}
+- A backup is the way back: \`ptero_backup_create\` before a risky change, and \`ptero_backup_restore\` to undo one
+  (it replaces everything since that backup).
 ${settings.admin ? '- The application-API tools exist (whole-panel reads, suspend, user and server creation). They are `admin`-class: a human signs them.' : '- No application-API tools: you can only use the client API for the servers above.'}
-- There is no delete: no tool removes a server, a user or a file tree. If a request needs that, say so.
+- Nothing here creates a panel user, a database or an allocation, and no tool deletes a server. If a request needs
+  that, say so rather than improvising.
 `;
 };
 

@@ -1,19 +1,29 @@
-import { config } from '@services/config.ts';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { basename, resolve, sep } from 'node:path';
+
+import { config, paths } from '@services/config.ts';
 import {
   POWER_SIGNALS,
   attributesOf,
+  chmodMode,
   commandRequest,
   describeServerLine,
+  jsonRequest,
   keyFor,
   listAttributes,
   powerRequest,
   pteroRequest,
+  pteroUpload,
+  remoteUrl,
   resolvePtero,
   safePath,
+  safeRelative,
   serverAllowed,
+  signedUrl,
   writeRequest,
   type PteroTarget,
 } from '@services/pterodactyl/api.ts';
+import { readConsole } from '@services/pterodactyl/console.ts';
 
 import {
   bytes,
@@ -24,6 +34,7 @@ import {
   requireStr,
   show,
   str,
+  strArray,
   type Availability,
   type Extension,
   type ExtensionCapability,
@@ -66,7 +77,58 @@ const fileTools = (guildId: string): Availability =>
     ? { 'ok': true, 'reason': '' }
     : { 'ok': false, 'reason': 'the panel file tools are switched off here (pterodactyl.files)' };
 
-const FILE_TOOLS = ['ptero_files', 'ptero_file_read', 'ptero_file_write'];
+const FILE_TOOLS = [
+  'ptero_files',
+  'ptero_file_read',
+  'ptero_file_write',
+  'ptero_file_upload',
+  'ptero_file_download',
+  'ptero_file_pull',
+  'ptero_file_delete',
+  'ptero_file_rename',
+  'ptero_file_mkdir',
+  'ptero_file_compress',
+  'ptero_file_decompress',
+  'ptero_file_chmod',
+  'ptero_file_copy',
+];
+
+/** The directory a panel file route works inside; the panel resolves every name against it. */
+const directoryOf = (args: Record<string, unknown>): string => safePath(str(args, 'directory') ?? '/', 'directory');
+
+/** One or more names inside that directory, which is the shape delete, compress and chmod take. */
+const namesOf = (args: Record<string, unknown>): string[] => {
+  const names = strArray(args, 'files').map(name => safeRelative(name, 'file'));
+  if (names.length === 0) throw new Error('files must name at least one entry in the directory');
+  return names;
+};
+
+/**
+ * A file the agent already has, and only inside this guild's workspace: an upload must not be a way to ship the
+ * deployment's `.env` or its database out of the bot.
+ */
+const workspaceFile = (guildId: string, source: string): string => {
+  const root = resolve(paths.workspaces, guildId);
+  const path = resolve(root, source.replace(/^\/+/, ''));
+  if (!path.startsWith(`${root}${sep}`)) throw new Error(`source must stay inside this workspace: ${source}`);
+  if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`no such file in this workspace: ${source}`);
+  return path;
+};
+
+/** Cron fields are what the panel stores; anything else it would refuse with a validation dump. */
+const cronField = (args: Record<string, unknown>, key: string, fallback: string): string => {
+  const value = (str(args, key) ?? fallback).trim();
+  if (!/^[\d*,\-/]+$/.test(value)) throw new Error(`${key} must look like *, 5, 1-5, */10 or 1,15,30`);
+  return value;
+};
+
+/** A schedule carries its tasks under `relationships.tasks`, either as a list or wrapped in `data` per serializer. */
+const taskCount = (row: Record<string, unknown>): number => {
+  const tasks = nested(row, 'relationships').tasks;
+  if (Array.isArray(tasks)) return tasks.length;
+  if (typeof tasks !== 'object' || tasks === null || !('data' in tasks)) return 0;
+  return Array.isArray(tasks.data) ? tasks.data.length : 0;
+};
 
 const tools: ExtensionCapability[] = [
   {
@@ -238,6 +300,701 @@ const tools: ExtensionCapability[] = [
         request,
       );
       return `wrote ${content.length} bytes to ${file} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_file_upload',
+    'summary': 'Upload a workspace file to a server',
+    'description':
+      'Send one file from this bot’s workspace (`repo/…` and anything else the agent can read) to a panel server, binary-safe. The panel signs a one-time node URL and the bytes go straight there, so the bot only holds the file. Use `ptero_file_write` for text you are composing.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      {
+        'name': 'source',
+        'kind': 'string',
+        'description': 'path in this workspace, e.g. repo/world.zip',
+        'required': true,
+      },
+      { 'name': 'directory', 'kind': 'string', 'description': 'destination directory, absolute, default /' },
+      { 'name': 'name', 'kind': 'string', 'description': 'file name on the server; default is the source name' },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const source = workspaceFile(ctx.guild.id, requireStr(args, 'source'));
+      const directory = directoryOf(args);
+      const name = safeRelative(str(args, 'name') ?? basename(source), 'name');
+      const written = await pteroUpload(
+        ctx.guild.id,
+        keyFor(target, 'client'),
+        server,
+        directory,
+        name,
+        readFileSync(source),
+      );
+      return `uploaded ${written} bytes to ${directory === '/' ? '/' : `${directory}/`}${name} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_file_download',
+    'summary': 'Get a download link for a server file',
+    'description':
+      'Ask the panel for a link to one file on a server, so a human can download it. The bytes never pass through the bot, and the link expires after 15 minutes.',
+    'risk': 'read',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'file', 'kind': 'string', 'description': 'absolute path to the file', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const file = safePath(requireStr(args, 'file'), 'file');
+      const url = signedUrl(
+        await pteroRequest(
+          ctx.guild.id,
+          'client',
+          keyFor(target, 'client'),
+          `/servers/${server}/files/download?file=${encodeURIComponent(file)}`,
+        ),
+        'download',
+      );
+      return `${file} on ${server}: ${url}\n(the link expires in 15 minutes)`;
+    },
+  },
+  {
+    'name': 'ptero_file_pull',
+    'summary': 'Download from a URL onto a server',
+    'description':
+      'Have the node fetch a file from the public internet straight into a server directory, which is how jars, plugins and mod packs get there without the bot’s bandwidth. Private, loopback and link-local addresses are refused. Wings must allow remote downloads.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'url', 'kind': 'string', 'description': 'http(s) URL the node should fetch', 'required': true },
+      { 'name': 'directory', 'kind': 'string', 'description': 'destination directory, absolute, default /' },
+      { 'name': 'filename', 'kind': 'string', 'description': 'save as this name instead of the URL’s' },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const directory = directoryOf(args);
+      const url = remoteUrl(requireStr(args, 'url'));
+      const filename = str(args, 'filename');
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/files/pull`,
+        jsonRequest('POST', {
+          url,
+          directory,
+          ...(filename === undefined ? {} : { 'filename': safeRelative(filename, 'filename') }),
+        }),
+      );
+      return `pulling ${url} into ${directory} on ${server}\n(the node downloads in the background; list the directory again in a moment)`;
+    },
+  },
+  {
+    'name': 'ptero_file_delete',
+    'summary': 'Delete files or folders',
+    'description':
+      'Remove entries from one directory of a server. There is no trash and no undo; the directory itself stays.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'directory', 'kind': 'string', 'description': 'directory holding the entries, default /' },
+      { 'name': 'files', 'kind': 'string[]', 'description': 'names inside that directory', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const directory = directoryOf(args);
+      const files = namesOf(args);
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/files/delete`,
+        jsonRequest('POST', { 'root': directory, 'files': files }),
+      );
+      return `deleted ${files.join(', ')} from ${directory} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_file_rename',
+    'summary': 'Rename or move a file',
+    'description': 'Rename one entry inside a server directory. A move is a rename into a subpath of that directory.',
+    'risk': 'reversible',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'directory', 'kind': 'string', 'description': 'directory holding the entry, default /' },
+      { 'name': 'from', 'kind': 'string', 'description': 'current name', 'required': true },
+      { 'name': 'to', 'kind': 'string', 'description': 'new name', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const directory = directoryOf(args);
+      const from = safeRelative(requireStr(args, 'from'), 'from');
+      const to = safeRelative(requireStr(args, 'to'), 'to');
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/files/rename`,
+        jsonRequest('PUT', { 'root': directory, 'files': [{ from, to }] }),
+      );
+      return `renamed ${from} to ${to} in ${directory} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_file_mkdir',
+    'summary': 'Create a folder',
+    'description': 'Create one directory inside a server directory.',
+    'risk': 'reversible',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'directory', 'kind': 'string', 'description': 'parent directory, default /' },
+      { 'name': 'name', 'kind': 'string', 'description': 'new folder name', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const directory = directoryOf(args);
+      const name = safeRelative(requireStr(args, 'name'), 'name');
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/files/create-folder`,
+        jsonRequest('POST', { 'root': directory, 'name': name }),
+      );
+      return `created ${directory === '/' ? '' : `${directory}/`}${name} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_file_compress',
+    'summary': 'Compress files into an archive',
+    'description':
+      'Create a .tar.gz holding one or more entries from one server directory. The node names the archive `archive-<timestamp>.tar.gz` in that same directory.',
+    'risk': 'reversible',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'directory', 'kind': 'string', 'description': 'directory holding the entries, default /' },
+      { 'name': 'files', 'kind': 'string[]', 'description': 'names inside that directory', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const directory = directoryOf(args);
+      const files = namesOf(args);
+      const created = attributesOf(
+        await pteroRequest(
+          ctx.guild.id,
+          'client',
+          keyFor(target, 'client'),
+          `/servers/${server}/files/compress`,
+          jsonRequest('POST', { 'root': directory, 'files': files }),
+        ),
+      );
+      return `created ${show(created.name)} (${show(created.size)}B) from ${files.join(', ')} in ${directory} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_file_decompress',
+    'summary': 'Extract an archive',
+    'description': 'Extract one archive inside a server directory, in place. Whatever is in it lands there.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'directory', 'kind': 'string', 'description': 'directory holding the archive, default /' },
+      { 'name': 'file', 'kind': 'string', 'description': 'archive name inside that directory', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const directory = directoryOf(args);
+      const file = safeRelative(requireStr(args, 'file'), 'file');
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/files/decompress`,
+        jsonRequest('POST', { 'root': directory, 'file': file }),
+      );
+      return `extracted ${file} in ${directory} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_file_chmod',
+    'summary': 'Change file permissions',
+    'description':
+      'Set the mode on entries inside one server directory, as octal like 644 or 0755. A wrong mode on a server jar or start script stops the server from starting.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'directory', 'kind': 'string', 'description': 'directory holding the entries, default /' },
+      { 'name': 'files', 'kind': 'string[]', 'description': 'names inside that directory', 'required': true },
+      { 'name': 'mode', 'kind': 'string', 'description': 'octal permissions, e.g. 644 or 0755', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const directory = directoryOf(args);
+      const files = namesOf(args);
+      const mode = chmodMode(requireStr(args, 'mode'));
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/files/chmod`,
+        jsonRequest('POST', {
+          'root': directory,
+          'files': files.map(file => ({ file, mode })),
+        }),
+      );
+      return `set ${files.join(', ')} to ${mode} in ${directory} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_file_copy',
+    'summary': 'Copy a file',
+    'description': 'Duplicate one file on a server; the node writes it next to the original with a `copy` suffix.',
+    'risk': 'reversible',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'file', 'kind': 'string', 'description': 'absolute path to the file', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePteroFiles(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const file = safePath(requireStr(args, 'file'), 'file');
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/files/copy`,
+        jsonRequest('POST', { 'location': file }),
+      );
+      return `copied ${file} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_console',
+    'summary': 'Read the console',
+    'description':
+      'Attach to a server’s console and report what it writes for a few seconds — startup errors, crashes, player chat. The panel keeps no history here, so this is a live window, not a log file.',
+    'risk': 'read',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'seconds', 'kind': 'number', 'description': 'how long to listen, 1–20 (default 5)' },
+      { 'name': 'lines', 'kind': 'number', 'description': 'stop after this many lines, 10–500 (default 100)' },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const seconds = Math.min(Math.max(num(args, 'seconds') ?? 5, 1), 20);
+      const lines = Math.min(Math.max(num(args, 'lines') ?? 100, 10), 500);
+      const tail = await readConsole(ctx.guild.id, server, { seconds, lines });
+      const body = tail.lines.length === 0 ? '(nothing was written in that window)' : tail.lines.join('\n');
+      return `${server} is ${tail.state}; console for ${seconds}s:\n${body}`;
+    },
+  },
+  {
+    'name': 'ptero_activity',
+    'summary': 'Recent server activity',
+    'description':
+      'The panel’s audit trail for one server: who started, stopped or edited what, newest first. This is where "why did it restart" is answered.',
+    'risk': 'read',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'event', 'kind': 'string', 'description': 'only events containing this text, e.g. file' },
+      { 'name': 'count', 'kind': 'number', 'description': 'how many entries, 1–100 (default 20)' },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const count = Math.min(Math.max(num(args, 'count') ?? 20, 1), 100);
+      const query = new URLSearchParams({ 'per_page': String(count), 'include': 'actor', 'sort': '-timestamp' });
+      const event = str(args, 'event');
+      if (event !== undefined) query.set('filter[event]', event);
+      const rows = listAttributes(
+        await pteroRequest(
+          ctx.guild.id,
+          'client',
+          keyFor(target, 'client'),
+          `/servers/${server}/activity?${query.toString()}`,
+        ),
+      );
+      if (rows.length === 0) return `no activity recorded for ${server}${event ? ` matching "${event}"` : ''}`;
+      return rows
+        .map(row => {
+          const actor = nested(nested(nested(row, 'relationships'), 'actor'), 'attributes');
+          return `${show(row.timestamp, '-')}  ${show(row.event)}  ${show(actor.username ?? actor.email, 'system')}`;
+        })
+        .join('\n');
+    },
+  },
+  {
+    'name': 'ptero_backups',
+    'summary': 'List backups',
+    'description': 'Every backup of a server with its uuid, size, creation time and whether it completed.',
+    'risk': 'read',
+    'params': [{ 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true }],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const rows = listAttributes(
+        await pteroRequest(ctx.guild.id, 'client', keyFor(target, 'client'), `/servers/${server}/backups`),
+      );
+      if (rows.length === 0) return `no backups of ${server}`;
+      return rows
+        .map(
+          backup =>
+            `${show(backup.uuid)}  ${show(backup.name)}  ${bytes(backup.bytes)}  created=${show(backup.created_at, '-')}  ` +
+            `completed=${backup.completed_at === null ? 'no' : show(backup.completed_at)}  locked=${backup.is_locked === true}`,
+        )
+        .join('\n');
+    },
+  },
+  {
+    'name': 'ptero_backup_create',
+    'summary': 'Back up a server',
+    'description':
+      'Start a backup of the whole server. The node works in the background, so the backup shows as unfinished until it completes; check `ptero_backups`.',
+    'risk': 'reversible',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'name', 'kind': 'string', 'description': 'label for the backup' },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const name = str(args, 'name');
+      const created = attributesOf(
+        await pteroRequest(
+          ctx.guild.id,
+          'client',
+          keyFor(target, 'client'),
+          `/servers/${server}/backups`,
+          jsonRequest('POST', { 'is_locked': false, ...(name === undefined ? {} : { name }) }),
+        ),
+      );
+      return `started backup ${show(created.uuid)} (${show(created.name)}) of ${server}; it is not finished until ptero_backups says so`;
+    },
+  },
+  {
+    'name': 'ptero_backup_restore',
+    'summary': 'Restore a backup',
+    'description':
+      'Unpack a backup over the server. By default it overwrites the files it holds and leaves newer ones alone; `truncate` deletes everything first, which is the true “back to that moment”. Stop the server first either way.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'backup', 'kind': 'string', 'description': 'backup uuid from ptero_backups', 'required': true },
+      {
+        'name': 'truncate',
+        'kind': 'boolean',
+        'description': 'delete every file first, then restore (default false)',
+      },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const backup = requireStr(args, 'backup');
+      const truncate = args.truncate === true;
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/backups/${encodeURIComponent(backup)}/restore`,
+        jsonRequest('POST', { truncate }),
+      );
+      return (
+        `restoring ${backup} onto ${server}${truncate ? ' after deleting every file' : ', overwriting what it holds'}; ` +
+        'the node works in the background and the server should stay stopped until it finishes'
+      );
+    },
+  },
+  {
+    'name': 'ptero_backup_delete',
+    'summary': 'Delete a backup',
+    'description': 'Remove one backup from a server and from the backup store. There is no undo.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'backup', 'kind': 'string', 'description': 'backup uuid from ptero_backups', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const backup = requireStr(args, 'backup');
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/backups/${encodeURIComponent(backup)}`,
+        { 'method': 'DELETE' },
+      );
+      return `deleted backup ${backup} of ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_backup_download',
+    'summary': 'Get a backup download link',
+    'description': 'A link to download one backup archive, signed by the panel and valid for a few minutes.',
+    'risk': 'read',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'backup', 'kind': 'string', 'description': 'backup uuid from ptero_backups', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const backup = requireStr(args, 'backup');
+      const url = signedUrl(
+        await pteroRequest(
+          ctx.guild.id,
+          'client',
+          keyFor(target, 'client'),
+          `/servers/${server}/backups/${encodeURIComponent(backup)}/download`,
+        ),
+        'backup download',
+      );
+      return `backup ${backup} of ${server}: ${url}\n(the link expires in a few minutes)`;
+    },
+  },
+  {
+    'name': 'ptero_schedules',
+    'summary': 'List schedules',
+    'description':
+      'The server’s cron schedules with their id, name, cron fields, whether they are active and when they next run.',
+    'risk': 'read',
+    'params': [{ 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true }],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const rows = listAttributes(
+        await pteroRequest(ctx.guild.id, 'client', keyFor(target, 'client'), `/servers/${server}/schedules`),
+      );
+      if (rows.length === 0) return `no schedules on ${server}`;
+      return rows
+        .map(row => {
+          const cron = nested(row, 'cron');
+          const when = [cron.minute, cron.hour, cron.day_of_month, cron.month, cron.day_of_week]
+            .map(field => show(field))
+            .join(' ');
+          return (
+            `id=${show(row.id)}  ${show(row.name)}  cron="${when}"  active=${row.is_active === true}  ` +
+            `next=${show(row.next_run_at, '-')}  tasks=${taskCount(row)}`
+          );
+        })
+        .join('\n');
+    },
+  },
+  {
+    'name': 'ptero_schedule_create',
+    'summary': 'Create a schedule',
+    'description':
+      'Create an empty cron schedule on a server; add what it should do with `ptero_schedule_task`. Fields are standard cron: wildcards, numbers, ranges, lists and steps.',
+    'risk': 'reversible',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'name', 'kind': 'string', 'description': 'what this schedule is for', 'required': true },
+      { 'name': 'minute', 'kind': 'string', 'description': 'cron minute, default 0' },
+      { 'name': 'hour', 'kind': 'string', 'description': 'cron hour, default *' },
+      { 'name': 'day_of_month', 'kind': 'string', 'description': 'cron day of month, default *' },
+      { 'name': 'day_of_week', 'kind': 'string', 'description': 'cron day of week, default *' },
+      { 'name': 'active', 'kind': 'boolean', 'description': 'run it on this cron (default true)' },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const created = attributesOf(
+        await pteroRequest(
+          ctx.guild.id,
+          'client',
+          keyFor(target, 'client'),
+          `/servers/${server}/schedules`,
+          jsonRequest('POST', {
+            'name': requireStr(args, 'name').slice(0, 191),
+            'is_active': args.active !== false,
+            'minute': cronField(args, 'minute', '0'),
+            'hour': cronField(args, 'hour', '*'),
+            'day_of_month': cronField(args, 'day_of_month', '*'),
+            'day_of_week': cronField(args, 'day_of_week', '*'),
+          }),
+        ),
+      );
+      return `created schedule id=${show(created.id)} "${show(created.name)}" on ${server}; it does nothing until ptero_schedule_task adds a task`;
+    },
+  },
+  {
+    'name': 'ptero_schedule_task',
+    'summary': 'Add a task to a schedule',
+    'description':
+      'Attach one action to a schedule: `power` (payload is start, stop, restart or kill), `command` (payload is the console command) or `backup`. Tasks run in sequence, offset from the scheduled time.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'schedule', 'kind': 'string', 'description': 'schedule id from ptero_schedules', 'required': true },
+      {
+        'name': 'action',
+        'kind': 'string',
+        'description': 'power | command | backup',
+        'required': true,
+        'choices': ['power', 'command', 'backup'],
+      },
+      { 'name': 'payload', 'kind': 'string', 'description': 'signal or command; ignored for backup' },
+      { 'name': 'offset', 'kind': 'number', 'description': 'seconds after the schedule fires, 0–900' },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const schedule = requireStr(args, 'schedule');
+      const action = pick(['power', 'command', 'backup'] as const, requireStr(args, 'action'), 'action');
+      const payload = str(args, 'payload') ?? '';
+      if (action !== 'backup' && payload.length === 0)
+        throw new Error(
+          `a ${action} task needs a payload: ${action === 'power' ? 'a signal like restart' : 'the command'}`,
+        );
+      if (action === 'power') pick(POWER_SIGNALS, payload, 'payload');
+      const created = attributesOf(
+        await pteroRequest(
+          ctx.guild.id,
+          'client',
+          keyFor(target, 'client'),
+          `/servers/${server}/schedules/${encodeURIComponent(schedule)}/tasks`,
+          jsonRequest('POST', {
+            'action': action,
+            'payload': payload,
+            'time_offset': Math.min(Math.max(num(args, 'offset') ?? 0, 0), 900),
+          }),
+        ),
+      );
+      return `added task ${show(created.id)} (${action}${payload.length > 0 ? ` ${payload}` : ''}) to schedule ${schedule} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_schedule_run',
+    'summary': 'Run a schedule now',
+    'description': 'Trigger a schedule immediately, as if its cron time had arrived. Its tasks run in order.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'schedule', 'kind': 'string', 'description': 'schedule id from ptero_schedules', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const schedule = requireStr(args, 'schedule');
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/schedules/${encodeURIComponent(schedule)}/execute`,
+        jsonRequest('POST', {}),
+      );
+      return `ran schedule ${schedule} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_schedule_delete',
+    'summary': 'Delete a schedule',
+    'description': 'Remove a schedule and its tasks from a server.',
+    'risk': 'destructive',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'schedule', 'kind': 'string', 'description': 'schedule id from ptero_schedules', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const schedule = requireStr(args, 'schedule');
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/schedules/${encodeURIComponent(schedule)}`,
+        { 'method': 'DELETE' },
+      );
+      return `deleted schedule ${schedule} on ${server}`;
+    },
+  },
+  {
+    'name': 'ptero_startup',
+    'summary': 'Read startup variables',
+    'description':
+      'The egg’s environment variables for a server — jar name, Java flags, world settings — with the startup command they produce.',
+    'risk': 'read',
+    'params': [{ 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true }],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const payload = await pteroRequest<{ data?: unknown; meta?: Record<string, unknown> }>(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/startup`,
+      );
+      const rows = listAttributes(payload);
+      const meta = payload?.meta ?? {};
+      return [
+        `startup: ${show(meta.startup_command, '-')}`,
+        ...rows.map(
+          row =>
+            `${show(row.env_variable)}=${show(row.server_value ?? row.default_value, '')}` +
+            `${row.is_editable === true ? '' : '  (read-only)'}  ${show(row.name, '')}`,
+        ),
+      ].join('\n');
+    },
+  },
+  {
+    'name': 'ptero_startup_set',
+    'summary': 'Change a startup variable',
+    'description':
+      'Set one egg environment variable on a server, e.g. the jar file or memory flags. The panel validates it against the egg; a restart applies it.',
+    'risk': 'reversible',
+    'params': [
+      { 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true },
+      { 'name': 'key', 'kind': 'string', 'description': 'variable name, e.g. SERVER_JARFILE', 'required': true },
+      { 'name': 'value', 'kind': 'string', 'description': 'new value', 'required': true },
+    ],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const key = requireStr(args, 'key');
+      const value = requireStr(args, 'value');
+      await pteroRequest(
+        ctx.guild.id,
+        'client',
+        keyFor(target, 'client'),
+        `/servers/${server}/startup/variable`,
+        jsonRequest('PUT', { 'key': key, 'value': value }),
+      );
+      return `set ${key}=${value} on ${server}; restart the server for it to take effect`;
+    },
+  },
+  {
+    'name': 'ptero_allocations',
+    'summary': 'List network allocations',
+    'description': 'Every ip:port assigned to a server, with notes and which one is the primary address.',
+    'risk': 'read',
+    'params': [{ 'name': 'server', 'kind': 'string', 'description': 'server identifier or uuid', 'required': true }],
+    'run': async (ctx, args) => {
+      const target = requirePtero(ctx.guild.id);
+      const server = requirePteroServer(target, requireStr(args, 'server'));
+      const rows = listAttributes(
+        await pteroRequest(ctx.guild.id, 'client', keyFor(target, 'client'), `/servers/${server}/network/allocations`),
+      );
+      if (rows.length === 0) return `no allocations on ${server}`;
+      return rows
+        .map(
+          row =>
+            `${show(row.ip_alias ?? row.ip)}:${show(row.port)}  primary=${row.is_default === true}` +
+            `${row.notes === null || row.notes === undefined ? '' : `  notes=${show(row.notes)}`}`,
+        )
+        .join('\n');
     },
   },
   {

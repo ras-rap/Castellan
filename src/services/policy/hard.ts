@@ -205,21 +205,11 @@ function accessRule(input: HardInput, capability: Capability, args: Record<strin
   return undefined;
 }
 
-/** Client tools address a server by `identifier`; the admin pair addresses it by panel `id`. */
-const PTERO_SERVER_TOOLS = [
-  'ptero_server',
-  'ptero_power',
-  'ptero_command',
-  'ptero_files',
-  'ptero_file_read',
-  'ptero_file_write',
-  'ptero_admin_server',
-  'ptero_admin_suspend',
-];
-
 /**
  * Panel allow-list rule. Whether the extension exists at all is the registry's answer (`available`), so this only
- * keeps "one server" meaning one server instead of "whatever the API key can reach".
+ * keeps "one server" meaning one server instead of "whatever the API key can reach". Which argument addresses the
+ * server is read from the tool's own declaration — client tools take `server`, the admin pair takes panel `id` —
+ * so a new panel tool is covered without a second list to keep in step.
  */
 function pterodactylRule(
   capability: Capability,
@@ -227,9 +217,10 @@ function pterodactylRule(
   settings: { enabled: boolean; admin: boolean; files: boolean; servers: string[] } | undefined,
 ): HardDecision | undefined {
   if (!capability.name.startsWith('ptero_')) return undefined;
-  if (!PTERO_SERVER_TOOLS.includes(capability.name)) return undefined;
   if (!settings) return undefined;
-  const server = typeof args.server === 'string' ? args.server : typeof args.id === 'string' ? args.id : '';
+  const declared = capability.params.map(param => param.name);
+  const raw = declared.includes('server') ? args.server : declared.includes('id') ? args.id : undefined;
+  const server = typeof raw === 'string' ? raw : '';
   if (server.length === 0) return undefined;
   if (settings.servers.length === 0) return undefined;
   if (settings.servers.some(entry => entry.toLowerCase() === server.toLowerCase())) return undefined;

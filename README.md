@@ -534,7 +534,7 @@ when they exist for a guild, and is switched on or off per server — so "add to
 | `discord` | 25 channels/roles/members/messages/threads/invites/permissions tools | always |
 | `shell` | `shell` (shown to the model as `discord_shell`) | always — the guild's `shell.mode` decides container vs host, and host mode also keeps opencode's raw `bash` |
 | `git` | `git_status`, `git_commit`; `git_push`, `git_repo_create` when a forge is configured | as declared per tool |
-| `pterodactyl` | 15 panel tools; the application-API half needs `pterodactyl.admin`, the file trio needs `pterodactyl.files` | a panel key + `pterodactyl.enabled` |
+| `pterodactyl` | 40 panel tools; the application-API half needs `pterodactyl.admin`, the file manager needs `pterodactyl.files` | a panel key + `pterodactyl.enabled` |
 
 ```
 /config set features.extensions.disabled git,pterodactyl   # per server, whole tool sets
@@ -676,17 +676,33 @@ PTERO_BASE_URL=https://panel.example.com
 /config set pterodactyl.enabled true                 # owner-only: remote infrastructure
 /config set pterodactyl.baseUrl https://panel.example.com
 /config set pterodactyl.servers d3aac109,7           # allow-list; empty = everything the key can see
-/config set pterodactyl.files false                  # read/overwrite files inside a server
+/config set pterodactyl.files false                  # the file manager: read, write, upload, delete
 /config set pterodactyl.admin false                  # application API: whole-panel tools
 ```
 
 | Tool | API | Risk | Exists when |
 | --- | --- | --- | --- |
 | `ptero_servers`, `ptero_server` | client | read | panel enabled |
-| `ptero_power` (start/stop/restart/kill), `ptero_command` (console) | client | destructive | panel enabled |
-| `ptero_files`, `ptero_file_read`, `ptero_file_write` | client | read / read / destructive | `pterodactyl.files` |
+| `ptero_console` (live console), `ptero_activity` (audit trail) | client | read | panel enabled |
+| `ptero_power` (start/stop/restart/kill), `ptero_command` | client | destructive | panel enabled |
+| `ptero_backups`, `ptero_backup_download` | client | read | panel enabled |
+| `ptero_backup_create` | client | reversible | panel enabled |
+| `ptero_backup_restore` (optional `truncate`), `ptero_backup_delete` | client | destructive | panel enabled |
+| `ptero_schedules`, `ptero_startup`, `ptero_allocations` | client | read | panel enabled |
+| `ptero_schedule_create`, `ptero_startup_set` | client | reversible | panel enabled |
+| `ptero_schedule_task`, `ptero_schedule_run`, `ptero_schedule_delete` | client | destructive | panel enabled |
+| `ptero_files`, `ptero_file_read`, `ptero_file_download` | client | read | `pterodactyl.files` |
+| `ptero_file_rename`, `ptero_file_mkdir`, `ptero_file_copy`, `ptero_file_compress` | client | reversible | `pterodactyl.files` |
+| `ptero_file_write`, `ptero_file_upload`, `ptero_file_pull`, `ptero_file_delete`, `ptero_file_decompress`, `ptero_file_chmod` | client | destructive | `pterodactyl.files` |
 | `ptero_admin_servers`, `ptero_admin_server`, `ptero_admin_users`, `ptero_admin_nodes`, `ptero_admin_nests` | application | read | `pterodactyl.admin` |
 | `ptero_admin_suspend`, `ptero_admin_user_create`, `ptero_admin_server_create` | application | destructive / **admin** | `pterodactyl.admin` |
+
+The file tools are the panel's own file manager: upload from the workspace (`ptero_file_upload`, over a signed
+one-time node URL — the panel key never leaves the panel), download from a URL straight onto the node
+(`ptero_file_pull`, which refuses loopback, link-local and private addresses), signed download links
+(`ptero_file_download`), plus delete, rename, mkdir, copy, compress, decompress and chmod. `ptero_console` is a live
+window: the panel API has no console history, so it attaches to the node's socket for a few seconds and reports
+what was written; for history, read the log files.
 
 Gating is layered like everything else, and the hard layer is the authority:
 
@@ -694,16 +710,21 @@ Gating is layered like everything else, and the hard layer is the authority:
   (`layer: tools`), so an older tool list cannot reach it;
 - **allow-list** — `pterodactyl.servers` is checked in code before any request leaves the bot
   (`layer: pattern`, reason starts `ptero-server:`), which is what keeps "one server" meaning one server;
-- **paths** — file paths must be absolute and cannot contain `..`, so a write cannot climb out of the server root;
+- **paths** — file paths must be absolute and cannot contain `..`; the names delete, compress and chmod act on
+  are relative to the directory given and cannot be absolute, so nothing climbs out of the server root or out of
+  this guild's workspace (an upload source is resolved inside `.data/workspaces/<guild>`);
 - **sets** — `features.tools.disabled: pterodactyl` hides the whole surface, `pterodactyl-admin` just the
   application-API half;
 - **per-account** — the usual `access.users.<id>` profile (`risk: read` is "look, do not touch"); reads are
-  `read`, power/command/file-write/suspend are `destructive`, user and server creation are `admin`-class, so the
-  rank ceiling and `policy.matrix` apply unchanged.
+  `read`, power/command/file-write/file-delete/backup-restore/suspend are `destructive`, user and server creation
+  are `admin`-class, so the rank ceiling and `policy.matrix` apply unchanged. The allow-list reads the server
+  argument from the tool's own declaration, so a new panel tool is covered without a second list to keep in step.
 
-There is deliberately **no delete**: no tool removes a server, a user, a node or a file tree. The keys are read
-from `.env` (never `config/guilds.json`), never logged, and every error message is passed through `redact` before
-it reaches the model.
+Deleting is limited to what an operator would expect a file manager to delete: files and folders, backups and
+schedules. There is still **no tool that removes a server, a user, a node, a database or an allocation** — those
+live on the application API's destroy routes and are deliberately not exposed. The keys are read from `.env` or the
+guild's own sealed secret (never `config/guilds.json`), never logged, and every error message is passed through
+`redact` before it reaches the model.
 
 ## Web dashboard (Clerk)
 

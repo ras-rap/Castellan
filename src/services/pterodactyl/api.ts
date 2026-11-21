@@ -179,18 +179,84 @@ export function safePath(path: string, what: 'file' | 'directory'): string {
   return value;
 }
 
+/**
+ * A name the panel resolves against a `root` directory: never absolute and never climbing, so a delete, a rename
+ * or an archive cannot reach outside the directory the model named.
+ */
+export function safeRelative(value: string, what: string): string {
+  const name = value.trim();
+  if (name.length === 0) throw new Error(`${what} must not be empty`);
+  if (name.startsWith('/')) throw new Error(`${what} must be relative to the directory, not an absolute path`);
+  if (name.split('/').includes('..')) throw new Error(`${what} must not contain ..`);
+  return name;
+}
+
+/** The panel hands out `{object:'signed_url', attributes:{url}}` for downloads and uploads: the node holds the bytes. */
+export function signedUrl(payload: unknown, what: string): string {
+  const url = attributesOf(payload).url;
+  if (typeof url !== 'string' || !/^https?:\/\/\S+$/i.test(url))
+    throw new Error(`the panel did not return a usable ${what} URL`);
+  return url;
+}
+
+/** Loopback, link-local, RFC1918, CGNAT and IPv6 unique-local: hosts that only mean something inside the node. */
+const internalHost = (host: string): boolean => {
+  const name = host.replace(/^\[|\]$/g, '').toLowerCase();
+  if (name === 'localhost' || name.endsWith('.localhost')) return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(name);
+  if (v4) {
+    const first = Number(v4[1]);
+    const second = Number(v4[2]);
+    if (first === 0 || first === 10 || first === 127) return true;
+    if (first === 169 && second === 254) return true;
+    if (first === 172 && second >= 16 && second <= 31) return true;
+    if (first === 192 && second === 168) return true;
+    return first === 100 && second >= 64 && second <= 127;
+  }
+  return name === '::1' || /^f[cd]/.test(name) || /^fe[89ab]/.test(name);
+};
+
+/**
+ * Wings fetches this URL *from the node*, so a pull is not a way to read the cluster's internals: only http(s),
+ * and never a host the node can reach but the internet cannot.
+ */
+export function remoteUrl(value: string, what = 'url'): string {
+  const raw = value.trim();
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`${what} must be an absolute http(s) URL`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(`${what} must be an http(s) URL`);
+  if (internalHost(url.hostname))
+    throw new Error(`${what} points at a private address; a panel pull may only fetch from the public internet`);
+  return url.toString();
+}
+
+/**
+ * The panel validates the mode as numeric and Wings parses those digits as base 8, so it travels as a string:
+ * `644` or `0755` in, `755` out. A model that wrote `493` would otherwise look valid and be rejected by the node.
+ */
+export function chmodMode(value: string): string {
+  const text = value.trim().replace(/^0+/, '');
+  if (!/^[0-7]{3,4}$/.test(text)) throw new Error('mode must be octal permissions like 644 or 0755');
+  return text;
+}
+
+/** One JSON body, which is what every panel route except a raw file write takes. */
+export const jsonRequest = (method: string, payload: Record<string, unknown>): { method: string; body: string } => ({
+  method,
+  'body': JSON.stringify(payload),
+});
+
 export const POWER_SIGNALS = ['start', 'stop', 'restart', 'kill'] as const;
 export type PowerSignal = (typeof POWER_SIGNALS)[number];
 
-export const powerRequest = (signal: PowerSignal): { method: string; body: string } => ({
-  'method': 'POST',
-  'body': JSON.stringify({ signal }),
-});
+export const powerRequest = (signal: PowerSignal): { method: string; body: string } => jsonRequest('POST', { signal });
 
-export const commandRequest = (command: string): { method: string; body: string } => ({
-  'method': 'POST',
-  'body': JSON.stringify({ command }),
-});
+export const commandRequest = (command: string): { method: string; body: string } =>
+  jsonRequest('POST', { 'command': command });
 
 /** Writing a file is a raw body, not JSON: the panel takes the exact bytes and `text/plain`. */
 export const writeRequest = (content: string): { method: string; body: string; contentType: string } => ({
@@ -198,3 +264,49 @@ export const writeRequest = (content: string): { method: string; body: string; c
   'body': content,
   'contentType': 'text/plain',
 });
+
+/** Uploads are held in memory once, so they are capped here whatever Wings is configured to accept. */
+const MAX_UPLOAD_BYTES = 64 * 1_048_576;
+
+/** Wings answers a failed upload with `{error}` where the panel uses `errors[].detail`. */
+async function nodeFailure(response: Response, what: string): Promise<string> {
+  const text = await response.text();
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = undefined;
+  }
+  if (typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string')
+    return `${payload.error} (HTTP ${response.status} ${what})`;
+  const body = text.trim().slice(0, 300);
+  return body.length > 0 ? `${body} (HTTP ${response.status} ${what})` : `HTTP ${response.status} ${what}`;
+}
+
+/**
+ * Two-step upload. The panel only signs a node URL (`GET /files/upload`); the bytes go straight to Wings as a
+ * multipart form with one `files` field, and the destination directory rides on that URL's query string. The
+ * panel's key is never sent to the node — the signed token is the authorisation there.
+ */
+export async function pteroUpload(
+  guildId: string,
+  key: string | undefined,
+  server: string,
+  directory: string,
+  filename: string,
+  content: Uint8Array,
+): Promise<number> {
+  if (content.byteLength === 0) throw new Error('there is nothing to upload: that file is empty');
+  if (content.byteLength > MAX_UPLOAD_BYTES)
+    throw new Error(`that file is ${Math.round(content.byteLength / 1_048_576)}MB; the upload limit here is 64MB`);
+  const signed = signedUrl(await pteroRequest(guildId, 'client', key, `/servers/${server}/files/upload`), 'upload');
+  const url = new URL(signed);
+  url.searchParams.set('directory', directory);
+  const form = new FormData();
+  // Blob takes any ArrayBufferView at runtime; the lib typing only admits ArrayBuffer-backed ones, and a caller's
+  // Uint8Array may sit on a shared buffer.
+  form.append('files', new Blob([content as unknown as BlobPart]), filename);
+  const response = await fetch(url, { 'method': 'POST', 'body': form, 'signal': AbortSignal.timeout(120_000) });
+  if (!response.ok) throw new Error(redact(await nodeFailure(response, 'upload'), key));
+  return content.byteLength;
+}
